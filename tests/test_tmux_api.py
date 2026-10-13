@@ -260,3 +260,188 @@ def test_kill_also_kills_the_tmux_session(client: TestClient, auth: dict) -> Non
     assert client.post(f"/api/session/{created['id']}/kill", headers=auth).status_code == 200
     time.sleep(0.4)
     assert not asyncio.run(tmux.has_session(name)), "tmux session outlived an explicit kill"
+
+
+@needs_tmux
+def test_attaching_twice_replaces_rather_than_duplicates(client: TestClient, auth: dict) -> None:
+    """Tapping a session in the switcher must switch to it, not clone it."""
+    import time
+
+    first = client.post("/api/session", json={"mode": "tmux", "slug": "twice"}, headers=auth).json()
+
+    second = client.post("/api/session", json={"mode": "tmux", "slug": "twice"}, headers=auth).json()
+    assert second["id"] != first["id"]
+
+    live = client.get("/api/sessions", headers=auth).json()["live"]
+    ours = [s for s in live if s["mode"] == "tmux" and s["slug"] == "twice"]
+    assert len(ours) == 1, f"expected 1 live entry for 'twice', got {len(ours)}"
+
+    assert client.get(f"/api/session/{first['id']}", headers=auth).status_code == 404
+
+    client.post(f"/api/session/{second['id']}/kill", headers=auth)
+    time.sleep(0.3)
+
+
+@needs_tmux
+def test_replacing_keeps_the_tmux_session_and_its_scrollback(client: TestClient, auth: dict) -> None:
+    import base64
+    import time
+
+    created = client.post("/api/session", json={"mode": "tmux", "slug": "keepmine"}, headers=auth).json()
+    name = next(
+        s["tmux_name"]
+        for s in client.get("/api/sessions", headers=auth).json()["live"]
+        if s["mode"] == "tmux"
+    )
+    for _ in range(60):
+        if asyncio.run(tmux.has_session(name)):
+            break
+        time.sleep(0.1)
+
+    with client.websocket_connect(f"/ws/{created['id']}?token={TOKEN}") as ws:
+        ws.receive_json()
+        ws.send_text(
+            json.dumps({"type": "stdin", "data": base64.b64encode(b"echo SURVIVES-SWAP\n").decode()})
+        )
+        seen = b""
+        for _ in range(60):
+            frame = ws.receive_json()
+            if frame.get("type") == "stdout":
+                seen += base64.b64decode(frame["data"])
+                if b"SURVIVES-SWAP" in seen:
+                    break
+    assert b"SURVIVES-SWAP" in seen
+
+    replacement = client.post("/api/session", json={"mode": "tmux", "slug": "keepmine"}, headers=auth).json()
+    with client.websocket_connect(f"/ws/{replacement['id']}?token={TOKEN}") as ws:
+        ws.receive_json()
+        transcript = b""
+        deadline = time.time() + 8
+        while time.time() < deadline and b"SURVIVES-SWAP" not in transcript:
+            frame = ws.receive_json()
+            if frame.get("type") == "stdout":
+                transcript += base64.b64decode(frame["data"])
+
+    assert b"SURVIVES-SWAP" in transcript, "replacing the session lost the tmux scrollback"
+    client.post(f"/api/session/{replacement['id']}/kill", headers=auth)
+
+
+@needs_tmux
+def test_different_slugs_still_coexist(client: TestClient, auth: dict) -> None:
+    import time
+
+    for slug in ("alpha", "beta"):
+        client.post("/api/session", json={"mode": "tmux", "slug": slug}, headers=auth)
+    live = client.get("/api/sessions", headers=auth).json()["live"]
+    ours = sorted(s["slug"] for s in live if s["mode"] == "tmux")
+    assert ours == ["alpha", "beta"]
+    for session in live:
+        client.post(f"/api/session/{session['id']}/kill", headers=auth)
+    time.sleep(0.2)
+
+
+def test_multiple_pty_sessions_still_coexist(client: TestClient, auth: dict) -> None:
+    """Dedupe is scoped to tmux names; ephemeral shells are not unique."""
+    client.post("/api/session", json={}, headers=auth)
+    client.post("/api/session", json={}, headers=auth)
+    live = client.get("/api/sessions", headers=auth).json()["live"]
+    assert len([s for s in live if s["mode"] == "pty"]) == 2
+
+
+@needs_tmux
+def test_persisted_listing_hides_live_slugs(client: TestClient, auth: dict) -> None:
+    import time
+
+    client.post("/api/session", json={"mode": "tmux", "slug": "hiding"}, headers=auth)
+    for _ in range(60):
+        listing = client.get("/api/sessions", headers=auth).json()
+        if listing["live"]:
+            break
+        time.sleep(0.1)
+
+    slugs = [s["slug"] for s in listing["live"] if s["mode"] == "tmux"]
+    persisted = [p["slug"] for p in listing["persisted"]]
+    check_set = set(slugs)
+    assert check_set, "expected a live tmux session"
+    assert not (check_set & set(persisted)), f"slug listed twice: {check_set & set(persisted)}"
+
+    session = next(s for s in listing["live"] if s["mode"] == "tmux")
+    client.post(f"/api/session/{session['id']}/kill", headers=auth)
+
+
+@needs_tmux
+def test_a_detached_session_can_still_be_killed(client: TestClient, auth: dict) -> None:
+    """Once detached it has no session id, so it needs a slug-level kill."""
+    import time
+
+    created = client.post("/api/session", json={"mode": "tmux", "slug": "ghost"}, headers=auth).json()
+    name = next(
+        s["tmux_name"]
+        for s in client.get("/api/sessions", headers=auth).json()["live"]
+        if s["mode"] == "tmux"
+    )
+    for _ in range(60):
+        if asyncio.run(tmux.has_session(name)):
+            break
+        time.sleep(0.1)
+
+    assert client.post(f"/api/session/{created['id']}/detach", headers=auth).status_code == 200
+    assert client.get(f"/api/session/{created['id']}", headers=auth).status_code == 404
+    time.sleep(0.3)
+    assert asyncio.run(tmux.has_session(name)), "detach should have kept it alive"
+
+    removed = client.delete("/api/persisted/ghost", headers=auth)
+    assert removed.status_code == 200
+    time.sleep(0.4)
+    assert not asyncio.run(tmux.has_session(name)), "persisted kill did not remove the session"
+
+    assert client.delete("/api/persisted/ghost", headers=auth).status_code == 404
+
+
+def test_persisted_kill_requires_auth(client: TestClient) -> None:
+    assert client.delete("/api/persisted/anything").status_code == 401
+
+
+def test_persisted_kill_rejects_a_bad_slug(client: TestClient, auth: dict) -> None:
+    response = client.delete("/api/persisted/bad%20slug", headers=auth)
+    assert response.status_code == 400
+
+
+@needs_tmux
+def test_the_cap_blocks_new_names_but_not_reopening() -> None:
+    """The cap limits extra tmux sessions; reconnecting to one you hold is not an extra.
+
+    The cap probe is stubbed so this checks the guard rather than the host's tmux
+    server, which other tests in this file also mutate.
+    """
+
+    async def run() -> tuple[str, str, bool, int]:
+        registry = SessionRegistry(
+            loop=asyncio.get_running_loop(),
+            namer=tmux.SlugNamer("cap-secret"),
+            tmux_max_sessions=1,
+        )
+        created = 0
+
+        async def probe() -> bool:
+            return created >= 1
+
+        registry._tmux_at_limit = probe  # type: ignore[method-assign]
+
+        first = await registry.create(mode="tmux", slug="capped")
+        created += 1
+        again = await registry.create(mode="tmux", slug="capped")
+        created += 1
+        blocked = False
+        try:
+            await registry.create(mode="tmux", slug="other")
+        except RuntimeError:
+            blocked = True
+        held = len([s for s in registry.all() if s.tmux_name == first.tmux_name])
+        registry.close_all()
+        return first.tmux_name or "", again.tmux_name or "", blocked, held
+
+    name, again, blocked, held = asyncio.run(run())
+    assert name == again, "reopening the same slug must reuse the tmux session"
+    assert blocked, "a genuinely new slug must still hit the cap"
+    assert held == 1, f"reopening should leave one live entry, not {held}"

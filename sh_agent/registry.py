@@ -81,8 +81,11 @@ class SessionRegistry:
                     raise tmux.TmuxUnavailable("tmux is not installed on this host")
                 clean = tmux.validate_slug(slug or "")
                 tmux_name = self._namer.qualify(clean)
-                if await self._tmux_at_limit():
+                # Re-attaching to a session we already hold does not add a tmux session,
+                # so it must not be blocked once the cap is reached.
+                if not self._tracks(tmux_name) and await self._tmux_at_limit():
                     raise RuntimeError(f"tmux session limit reached ({self._tmux_max_sessions})")
+                await self._supersede(tmux_name)
                 env_overrides = {"SH_SLUG": clean, "SH_TMUX_NAME": tmux_name}
 
             session_id = uuid.uuid4().hex
@@ -103,6 +106,32 @@ class SessionRegistry:
             self._sessions[session_id] = session
             return session
 
+    def _tracks(self, tmux_name: str) -> bool:
+        return any(session.tmux_name == tmux_name for session in self._sessions.values())
+
+    async def _supersede(self, tmux_name: str) -> list[str]:
+        """Replace any session we already track for this tmux name.
+
+        tmux happily attaches several clients to one session, so without this every
+        tap on a session in the switcher would add another PTY and another registry
+        row pointing at the same tmux session. Attaching is a switch, not a clone:
+        the old socket is closed and its client detached before the new one attaches.
+        The tmux session itself, and its scrollback, is untouched.
+        """
+        replaced: list[str] = []
+        for session_id, session in list(self._sessions.items()):
+            if session.tmux_name != tmux_name:
+                continue
+            self._sessions.pop(session_id, None)
+            session.close()
+            replaced.append(session_id)
+        if replaced:
+            try:
+                await tmux.detach_session(tmux_name)
+            except tmux.TmuxUnavailable:
+                pass
+        return replaced
+
     async def _tmux_at_limit(self) -> bool:
         try:
             ours = [s for s in await tmux.list_sessions() if self._namer.owns(s.name)]
@@ -122,6 +151,29 @@ class SessionRegistry:
                 continue
             result.append(tmux.TmuxSession(name=session.name, attached=session.attached, slug=slug))
         return result
+
+    async def kill_persisted(self, slug: str) -> bool:
+        """Kill a tmux session that is no longer in the registry.
+
+        Once a session is detached it leaves the registry, so the per-session kill
+        endpoint 404s and the session can only be removed by the sweeper or tmux
+        itself. This is the explicit path the app needs.
+        """
+        clean = tmux.validate_slug(slug)
+        name = self._namer.qualify(clean)
+        for session_id, session in list(self._sessions.items()):
+            if session.tmux_name == name:
+                await self.kill(session_id)
+                return True
+        if not self._namer.owns(name):
+            return False
+        try:
+            if not await tmux.has_session(name):
+                return False
+        except tmux.TmuxUnavailable:
+            return False
+        await tmux.kill_session(name)
+        return True
 
     async def reap_tmux(self) -> list[str]:
         """Kill tmux sessions of ours that nobody is attached to and that outlived the TTL."""

@@ -173,6 +173,13 @@ sharing a token shares a namespace — set `SH_TMUX_SECRET` for isolation.
 them at `SH_TMUX_MAX_SESSIONS` and only ever kills sessions with **no attached client** — an
 explicit `kill` removes the tmux session itself, while `detach` deliberately leaves it running.
 
+**Attaching is a switch, not a clone.** tmux will happily attach several clients to one session, so
+tapping a session repeatedly would otherwise add a PTY and a registry row every time. Creating a
+tmux session now *replaces* any session the agent already tracks under that name: the old socket is
+closed, its tmux clients are detached, and the new one attaches. The tmux session and its scrollback
+are untouched, so reconnecting mid-task is seamless. `/api/sessions` also omits any slug that is
+already listed as live, so one session can never read as two rows.
+
 ### Socket lifetime
 
 Killing or reaping a session **closes its WebSocket** with code `4404`. Without that, the client
@@ -207,7 +214,7 @@ export SH_TOKEN=$(.venv/bin/python -m sh_agent --generate-token)
 .venv/bin/python scripts/verify_m1.py               # 23 checks: shell, resize, auth, resume
 .venv/bin/python scripts/verify_resume.py           # 10 checks: drop mid-stream, zero loss
 .venv/bin/python scripts/verify_resume_eviction.py  # 11 checks: resume from an evicted offset
-.venv/bin/python scripts/verify_tmux.py                # 18 checks: named sessions end to end
+.venv/bin/python scripts/verify_tmux.py                # 27 checks: named sessions end to end
 ```
 
 New API:
@@ -216,6 +223,7 @@ New API:
 |---|---|---|
 | `GET` | `/api/sessions` | List live PTY sessions and persisted tmux sessions |
 | `POST` | `/api/session/{id}/detach` | Drop the socket but keep a tmux session running |
+| `DELETE` | `/api/persisted/{slug}` | Remove a detached tmux session (it has no session id left to kill by) |
 
 ## Roadmap
 

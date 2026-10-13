@@ -111,7 +111,14 @@ async def list_sessions(request: Request, _: Identity = Depends(require_auth)) -
         }
         for s in registry.all()
     ]
-    persisted = [{"name": s.name, "slug": s.slug, "attached": s.attached} for s in await registry.list_tmux()]
+    # A slug that is live is already listed above; returning it in both lists makes one
+    # session read as two.
+    live_slugs = {s["slug"] for s in live if s.get("slug")}
+    persisted = [
+        {"name": s.name, "slug": s.slug, "attached": s.attached}
+        for s in await registry.list_tmux()
+        if s.slug not in live_slugs
+    ]
     return {
         "live": live,
         "persisted": persisted,
@@ -119,6 +126,24 @@ async def list_sessions(request: Request, _: Identity = Depends(require_auth)) -
         "tmux_enabled": config.tmux_enabled,
         "max_sessions": registry.max_sessions,
     }
+
+
+@router.delete("/api/persisted/{slug}")
+async def kill_persisted_session(
+    slug: str, request: Request, identity: Identity = Depends(require_auth)
+) -> dict[str, object]:
+    """Remove a detached tmux session, which by then has no session id to kill by."""
+    registry = get_registry(request)
+    try:
+        removed = await registry.kill_persisted(slug)
+    except tmux.SlugError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except tmux.TmuxUnavailable as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="no such persisted session")
+    get_audit(request).record("tmux.kill_persisted", slug=slug, login=identity.login)
+    return {"status": "killed", "slug": slug}
 
 
 @router.post("/api/session/{session_id}/detach")
