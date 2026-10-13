@@ -536,3 +536,75 @@ def test_resizing_a_pty_delivers_sigwinch_to_the_shell() -> None:
 
     text = asyncio.run(run())
     assert re.search(r"\b21 48\b", text), f"shell never saw the resize; output was: {text!r}"
+
+
+def test_tmux_mode_can_be_disabled() -> None:
+    """SH_TMUX_ENABLED=0 must actually refuse, not just be advertised in /api/sessions."""
+    from sh_agent.app import create_app
+    from sh_agent.auth import AuthConfig
+    from sh_agent.config import Config
+
+    config = Config(
+        host="127.0.0.1",
+        port=0,
+        palette_path=str("/tmp/sh-disabled-palette.json"),
+        audit_path=str("/tmp/sh-disabled-audit.log"),
+        tmux_enabled=False,
+    )
+    config.auth = AuthConfig(token=TOKEN, tailscale_require=False)
+    app = create_app(config)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        created = client.post("/api/session", json={"mode": "tmux", "slug": "nope"}, headers=headers)
+        assert created.status_code == 501, f"expected 501, got {created.status_code}"
+        assert "disabled" in created.json()["detail"]
+
+        # Plain shells must keep working; the flag only turns off tmux.
+        assert client.post("/api/session", json={}, headers=headers).status_code == 201
+
+        listing = client.get("/api/sessions", headers=headers).json()
+        assert listing["tmux_enabled"] is False
+
+
+@needs_tmux
+def test_the_idle_ttl_actually_expires_sessions() -> None:
+    """A session nothing is attached to must be reaped once the TTL passes."""
+    import time as time_mod
+
+    async def run() -> tuple[str, list[str]]:
+        namer = tmux.SlugNamer("ttl-secret")
+        name = namer.qualify("ancient")
+        await tmux.kill_session(name)
+        registry = SessionRegistry(
+            loop=asyncio.get_running_loop(),
+            namer=namer,
+            tmux_max_sessions=50,
+            tmux_idle_ttl=1.0,
+        )
+        from sh_agent.pty_session import PtySession
+
+        session = PtySession(
+            session_id=f"s-{name}",
+            loop=asyncio.get_running_loop(),
+            shell=f"tmux new-session -A -s {name}",
+            mode="tmux",
+            slug=name,
+            tmux_name=name,
+        )
+        await session.open()
+        for _ in range(60):
+            if await tmux.has_session(name):
+                break
+            await asyncio.sleep(0.1)
+        session.close()
+
+        assert await tmux.has_session(name), "session should exist before the sweep"
+        await asyncio.sleep(1.2)
+        reaped = await registry.reap_tmux()
+        still_there = await tmux.has_session(name)
+        await tmux.kill_session(name)
+        return name, reaped, still_there
+
+    name, reaped, still_there = asyncio.run(run())
+    assert not still_there, "the idle session outlived the TTL"
+    assert name in reaped

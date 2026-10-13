@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import time
 import uuid
 
 from . import tmux
@@ -30,6 +31,7 @@ class SessionRegistry:
         namer: tmux.SlugNamer | None = None,
         tmux_max_sessions: int = DEFAULT_TMUX_MAX,
         tmux_idle_ttl: float = DEFAULT_TMUX_IDLE_TTL,
+        tmux_enabled: bool = True,
     ) -> None:
         self._loop = loop
         self._shell = shell
@@ -42,6 +44,7 @@ class SessionRegistry:
         self._namer = namer or tmux.SlugNamer("sh-default")
         self._tmux_max_sessions = tmux_max_sessions
         self._tmux_idle_ttl = tmux_idle_ttl
+        self._tmux_enabled = tmux_enabled
         self._sessions: dict[str, PtySession] = {}
         self._reaper: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -77,6 +80,10 @@ class SessionRegistry:
             tmux_name = None
 
             if mode == "tmux":
+                # The flag exists to let an operator turn the feature off. Checking it
+                # here rather than in the route covers every caller.
+                if not self._tmux_enabled:
+                    raise tmux.TmuxUnavailable("tmux sessions are disabled (SH_TMUX_ENABLED=0)")
                 if not tmux.available():
                     raise tmux.TmuxUnavailable("tmux is not installed on this host")
                 clean = tmux.validate_slug(slug or "")
@@ -182,17 +189,40 @@ class SessionRegistry:
         except tmux.TmuxUnavailable:
             return []
         candidates = [s for s in sessions if self._namer.owns(s.name)]
-        if len(candidates) <= self._tmux_max_sessions:
+        if not candidates:
             return []
-        candidates.sort(key=lambda s: s.name)
+
+        # tmux reports activity as Unix epoch, so compare against wall clock rather
+        # than the event loop's monotonic clock.
+        now = time.time()
         reaped: list[str] = []
+
+        # Age first. SH_TMUX_IDLE_TTL exists so unattached sessions do not pile up
+        # forever on a machine that rarely reaches the cap.
         for session in candidates:
             if session.attached > 0:
                 continue
-            if len(candidates) - len(reaped) <= self._tmux_max_sessions:
-                break
-            await tmux.kill_session(session.name)
-            reaped.append(session.name)
+            if self._tmux_idle_ttl <= 0:
+                continue
+            if session.activity is None:
+                continue
+            if now - session.activity >= self._tmux_idle_ttl:
+                await tmux.kill_session(session.name)
+                reaped.append(session.name)
+
+        if reaped:
+            candidates = [s for s in candidates if s.name not in set(reaped)]
+
+        # Then the count cap, oldest first, and never anything currently attached.
+        if len(candidates) > self._tmux_max_sessions:
+            candidates.sort(key=lambda s: (s.activity is None, s.activity or 0, s.name))
+            for session in candidates:
+                if session.attached > 0:
+                    continue
+                if len(candidates) - len(reaped) <= self._tmux_max_sessions:
+                    break
+                await tmux.kill_session(session.name)
+                reaped.append(session.name)
         return reaped
 
     def close(self, session_id: str) -> bool:
@@ -304,7 +334,6 @@ class AuditLog:
         if not self._path or not self.enabled:
             return
         import json
-        import time
 
         entry = {
             "ts": time.time(),

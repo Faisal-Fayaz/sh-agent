@@ -84,6 +84,9 @@ class TmuxSession:
     name: str
     attached: int
     slug: str | None = None
+    # Unix time of the session's last activity, which tmux advances when a client
+    # attaches or detaches. Used as the idle signal for SH_TMUX_IDLE_TTL.
+    activity: int | None = None
 
 
 def attach_argv(name: str, cwd: str | None = None) -> list[str]:
@@ -110,7 +113,12 @@ async def _run(*argv: str, check: bool = False) -> tuple[int, str]:
 
 async def list_sessions() -> list[TmuxSession]:
     try:
-        code, out = await _run(TMUX_BIN, "list-sessions", "-F", "#{session_name} #{session_attached}")
+        code, out = await _run(
+            TMUX_BIN,
+            "list-sessions",
+            "-F",
+            "#{session_name} #{session_attached} #{session_activity}",
+        )
     except TmuxUnavailable:
         return []
     if code != 0:
@@ -120,14 +128,21 @@ async def list_sessions() -> list[TmuxSession]:
         line = line.strip()
         if not line:
             continue
-        name, _, attached = line.rpartition(" ")
-        if not name:
+        fields = line.split()
+        if len(fields) < 2:
             continue
+        name = fields[0]
         try:
-            count = int(attached)
+            count = int(fields[1])
         except ValueError:
             count = 0
-        sessions.append(TmuxSession(name=name, attached=count))
+        activity = None
+        if len(fields) >= 3:
+            try:
+                activity = int(fields[2])
+            except ValueError:
+                activity = None
+        sessions.append(TmuxSession(name=name, attached=count, activity=activity))
     return sessions
 
 

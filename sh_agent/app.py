@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
         namer=SlugNamer(config.tmux_secret),
         tmux_max_sessions=config.tmux_max_sessions,
         tmux_idle_ttl=config.tmux_idle_ttl,
+        tmux_enabled=config.tmux_enabled,
     )
     app.state.registry = registry
     registry.start_reaper()
