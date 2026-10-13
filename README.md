@@ -3,7 +3,44 @@
 Tailscale-reachable PTY daemon. Gives a phone (or any tailnet peer) an interactive shell plus a
 gesture-friendly command palette API.
 
-Status: **M1 complete** — agent, protocol, palette CRUD, auth, tests.
+Status: agent and app complete. See `sh-app` for the Expo client.
+
+Gives an Android client a real interactive shell on your machine over your private network:
+gesture-driven control keys, a swipe-to-run command palette, and sessions that survive a network
+drop without losing scrollback.
+
+## Try it in five minutes
+
+You need Python 3.11+, the client repo, and either Tailscale or a shared LAN.
+
+```bash
+# 1. agent
+uv venv && uv pip install -e ".[dev]"
+export SH_TOKEN="$(uv run python -m sh_agent --generate-token)"
+export SH_WRITE_TOKEN="$(uv run python -m sh_agent --generate-token)"   # optional
+export SH_HOST=0.0.0.0 SH_ALLOW_LAN=1     # only if you are not on Tailscale
+uv run python -m sh_agent
+```
+
+The agent prints the address it bound to. With Tailscale running that is your `100.x` address and
+you can skip the `SH_HOST` line entirely — that is the intended setup and the one the security
+model assumes.
+
+```bash
+# 2. client, in a second terminal
+git clone <your-fork> sh-app && cd sh-app
+npm install            # postinstall regenerates the inlined xterm payload
+npx expo start         # scan the QR with Expo Go
+```
+
+In the app: **Host** the printed address, **Port** `8765`, **Token** the `SH_TOKEN` you generated.
+Leave the Write token blank unless you want to edit the palette from the phone.
+
+Verify it worked:
+
+```bash
+curl -s http://<host>:8765/health | python3 -m json.tool
+```
 
 ## Quick start
 
