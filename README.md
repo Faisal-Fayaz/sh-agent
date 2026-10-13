@@ -225,7 +225,7 @@ a hot-reload dev loop hits `SH_MAX_SESSIONS` within minutes.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q          # 43 unit + API tests, incl. a fake tailscaled socket
+.venv/bin/python -m pytest -q          # 99 unit + API tests, incl. a fake tailscaled socket
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format .
 
@@ -266,7 +266,15 @@ one thing that would make `preexec_fn` unsafe.
 
 ## Roadmap
 
-- **M2** — Expo app: xterm.js in a WebView, bidirectional keystrokes, ANSI rendering
-- **M3** — Gesture layer: two-finger arrows, swipe `Ctrl-C`/`Ctrl-D`, sticky modifiers, haptics
-- **M4** — Command palette UI: swipe-to-run, host-synced entries
-- **M5** — Tailscale identity enforcement, systemd user unit, reconnect hardening
+M1 through M5 are complete: the PTY agent, the Expo client, the gesture layer, the command
+palette, and Tailscale identity plus reconnect hardening. What remains is distribution
+rather than features.
+
+- **Publish** — `sh-agent` to PyPI, and a signed build of the app (needs an Expo account
+  for EAS, or a local Gradle keystore).
+- **Bootstrap** — a one-command installer that sets up Tailscale, generates a token, and
+  hands the phone a scannable pairing code. Onboarding is currently the highest-friction
+  part of using this, not the networking.
+- **Windows** — out of scope for now. The agent is POSIX-only: `os.openpty`, `TIOCSCTTY`
+  and `killpg` have no Windows equivalent, and there is no ConPTY layer. Supporting it
+  means a real abstraction, not a patch. macOS and Linux are the supported hosts.
