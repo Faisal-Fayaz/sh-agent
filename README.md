@@ -225,6 +225,21 @@ New API:
 | `POST` | `/api/session/{id}/detach` | Drop the socket but keep a tmux session running |
 | `DELETE` | `/api/persisted/{slug}` | Remove a detached tmux session (it has no session id left to kill by) |
 
+## Terminal size
+
+Sessions are created at 80x24 and resized as the client measures itself. That resize only
+reaches full-screen programs if the spawned shell owns its controlling terminal: the agent
+uses `os.openpty()` plus `setsid()`, and without `TIOCSCTTY` there is no foreground process
+group, so `TIOCSWINSZ` updates the stored size but never delivers `SIGWINCH`. A plain shell
+reads the size when asked and so never notices; tmux, vim and other full-screen programs only
+re-read the terminal when signalled, and would keep rendering for their startup size. With
+the controlling terminal in place, tmux follows the client and its `window-size latest`
+option does the right thing on its own.
+
+`preexec_fn` targets the slave fd rather than stdin because CPython runs it before it dup2's
+the standard streams, so fd 0 is not yet the pty. The agent is single-threaded, which is the
+one thing that would make `preexec_fn` unsafe.
+
 ## Roadmap
 
 - **M2** — Expo app: xterm.js in a WebView, bidirectional keystrokes, ANSI rendering
