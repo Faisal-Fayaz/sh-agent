@@ -1,0 +1,29 @@
+[
+  {
+    "id": "a1b2c3d4e5f6",
+    "name": "restart agent",
+    "command": "systemctl --user restart sh-agent",
+    "group": "ops",
+    "description": "Bounce the sh-agent service"
+  },
+  {
+    "id": "f6e5d4c3b2a1",
+    "name": "agent logs",
+    "command": "journalctl --user -u sh-agent -n 200 --no-pager",
+    "group": "ops",
+    "description": "Tail the last 200 lines of agent logs"
+  },
+  {
+    "id": "0f1e2d3c4b5a",
+    "name": "sh tests",
+    "command": "pytest -q",
+    "group": "dev",
+    "description": "Run the sh test suite"
+  },
+  {
+    "id": "9988776655aa",
+    "name": "disk usage",
+    "command": ["du", "-sh", "*"],
+    "group": "system"
+  }
+]
