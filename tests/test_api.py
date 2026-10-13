@@ -403,3 +403,23 @@ def test_events_are_actually_recorded(client: TestClient, tmp_path) -> None:
     client.get("/whoami", headers={"Authorization": f"Bearer {TOKEN}"})
     contents = audit_file.read_text()
     assert "auth.ok" in contents
+
+
+def test_reconnecting_to_a_session_does_not_accumulate_close_listeners(client: TestClient) -> None:
+    """Switching back and forth is the normal path now; it must not leak sockets."""
+    from sh_agent.pty_session import PtySession
+
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    session_id = client.post("/api/session", json={}, headers=headers).json()["id"]
+    registry = client.app.state.registry
+    session = registry.get(session_id)
+    assert isinstance(session, PtySession)
+    baseline = len(session._close_listeners)
+
+    for _ in range(5):
+        with client.websocket_connect(f"/ws/{session_id}?token={TOKEN}") as ws:
+            ws.receive_json()
+
+    assert len(session._close_listeners) == baseline, (
+        f"listeners grew from {baseline} to {len(session._close_listeners)} across reconnects"
+    )

@@ -288,6 +288,7 @@ async def terminal_socket(
         audit.record("ws.error", session_id=session_id, error=str(exc))
     finally:
         session.detach()
+        session.forget_close_listener(close_socket)
         audit.record("ws.close", session_id=session_id)
         try:
             await websocket.close()

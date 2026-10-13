@@ -176,6 +176,17 @@ class PtySession:
         """Register a synchronous callback fired when the session is torn down."""
         self._close_listeners.append(callback)
 
+    def forget_close_listener(self, callback: Callable[[], None]) -> None:
+        """Drop a callback registered by a socket that has already gone away.
+
+        The app reconnects to the same session id every time it switches back, so
+        without this a long-lived session accumulates one dead socket per visit.
+        """
+        try:
+            self._close_listeners.remove(callback)
+        except ValueError:
+            pass
+
     def _notify_closed(self) -> None:
         for callback in list(self._close_listeners):
             try:
