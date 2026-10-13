@@ -59,6 +59,30 @@ export SH_WRITE_TOKEN="$(.venv/bin/python -m sh_agent --generate-token)"   # opt
 With Tailscale running and no `SH_HOST` set, the agent binds to your tailnet address (`100.x.y.z`)
 rather than `0.0.0.0`, so it is never exposed off-tailnet. Set `SH_ALLOW_LAN=1` to override (dev only).
 
+## Running it always
+
+A phone client is only useful if the agent is up when you reach for it, and a shell
+started by hand dies with the terminal. A **user** unit needs no root and survives
+reboots once you log in or enable lingering:
+
+```bash
+install -Dm755 systemd/sh-agent.service ~/.config/systemd/user/sh-agent.service
+mkdir -p ~/.config/sh ~/.local/state/sh
+printf 'SH_TOKEN=%s\n' "$(.venv/bin/sh-agent --generate-token)" > ~/.config/sh/agent.env
+chmod 600 ~/.config/sh/agent.env
+systemctl --user daemon-reload && systemctl --user enable --now sh-agent
+loginctl enable-linger "$USER"    # optional: keep it running without a login session
+```
+
+The token lives in `~/.config/sh/agent.env` rather than the unit file so it is not
+baked into something that gets copied around. The agent refuses to start without one.
+
+**One ordering caveat.** `tailscaled` is a system unit, so a user unit cannot order
+itself against it. If the agent wins that race on boot it binds `127.0.0.1` instead of
+the tailnet address, which is silently unreachable from the phone. The agent prints
+the address it bound to, so check that line after a reboot; if it says `127.0.0.1`
+while you are on a tailnet, run `systemctl --user restart sh-agent`.
+
 ## Configuration
 
 | Variable | Default | Meaning |

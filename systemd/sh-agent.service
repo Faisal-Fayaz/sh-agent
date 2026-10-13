@@ -1,0 +1,27 @@
+[Unit]
+Description=sh-agent (terminal agent for the sh phone client)
+Documentation=https://github.com/OWNER/sh
+
+# tailscaled is a system unit, so a user unit cannot order itself against it.
+# If the agent wins the race it falls back to binding localhost, which is silently
+# unreachable from the phone. RestartSec plus `systemctl --user restart sh-agent`
+# after `tailscale up` is the escape hatch; the agent prints the address it bound to,
+# so a wrong bind is visible rather than mysterious.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/sh-agent
+Restart=always
+RestartSec=3
+
+# The agent refuses to start without a token. Keep it in a file rather than baking a
+# secret into this unit; create it once with:
+#   sh-agent --generate-token >> ~/.config/sh/agent.env   (then prefix SH_TOKEN=)
+EnvironmentFile=-%h/.config/sh/agent.env
+
+# Sessions are long-lived WebSockets, so the service must not be culled for idleness.
+
+[Install]
+WantedBy=default.target
