@@ -12,6 +12,7 @@ from .config import Config
 from .palette import PaletteStore
 from .registry import AuditLog, SessionRegistry
 from .routes import commands, health, session
+from .tmux import SlugNamer
 
 
 @asynccontextmanager
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI):
         detach_grace=config.detach_grace,
         reap_interval=config.reap_interval,
         ring_capacity=config.ring_capacity,
+        namer=SlugNamer(config.tmux_secret),
+        tmux_max_sessions=config.tmux_max_sessions,
+        tmux_idle_ttl=config.tmux_idle_ttl,
     )
     app.state.registry = registry
     registry.start_reaper()

@@ -88,10 +88,16 @@ class PtySession:
         rows: int = 24,
         env_overrides: dict[str, str] | None = None,
         ring_capacity: int = DEFAULT_RING_CAPACITY,
+        mode: str = "pty",
+        slug: str | None = None,
+        tmux_name: str | None = None,
     ) -> None:
         self.id = session_id
         self._loop = loop
         self._shell_argv = shlex.split(shell) if shell else ["/bin/bash", "-l"]
+        self.mode = mode
+        self.slug = slug
+        self.tmux_name = tmux_name
         self._cwd = cwd
         self._env_overrides = env_overrides or {}
         self._master_fd: int | None = None
@@ -112,6 +118,10 @@ class PtySession:
     @property
     def shell(self) -> str:
         return shlex.join(self._shell_argv)
+
+    @property
+    def is_tmux(self) -> bool:
+        return self.mode == "tmux"
 
     @property
     def cwd(self) -> str | None:

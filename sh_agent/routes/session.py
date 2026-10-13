@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from .. import tmux
 from ..auth import Authenticator, AuthError, Identity
 from ..protocol import (
     ServerMessage,
@@ -18,6 +19,7 @@ from ..protocol import (
 from ..registry import AuditLog, SessionRegistry
 from .deps import (
     get_audit,
+    get_config,
     get_registry,
     require_auth,
     websocket_authorization,
@@ -30,10 +32,14 @@ class CreateSessionRequest(BaseModel):
     cols: int = Field(default=80, ge=1, le=1000)
     rows: int = Field(default=24, ge=1, le=1000)
     cwd: str | None = None
+    mode: str = "pty"
+    slug: str | None = None
 
 
 class SessionInfo(BaseModel):
     id: str
+    mode: str
+    slug: str | None
     shell: str
     cols: int
     rows: int
@@ -54,8 +60,20 @@ async def create_session(
 ) -> SessionInfo:
     payload = body or CreateSessionRequest()
     registry = get_registry(request)
+    if payload.mode not in ("pty", "tmux"):
+        raise HTTPException(status_code=400, detail="mode must be 'pty' or 'tmux'")
     try:
-        session = await registry.create(cols=payload.cols, rows=payload.rows, cwd=payload.cwd)
+        session = await registry.create(
+            cols=payload.cols,
+            rows=payload.rows,
+            cwd=payload.cwd,
+            mode=payload.mode,
+            slug=payload.slug,
+        )
+    except tmux.TmuxUnavailable as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except tmux.SlugError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     get_audit(request).record(
@@ -77,6 +95,52 @@ async def get_session(session_id: str, request: Request, _: Identity = Depends(r
     return _info(session)
 
 
+@router.get("/api/sessions")
+async def list_sessions(request: Request, _: Identity = Depends(require_auth)) -> dict[str, object]:
+    registry = get_registry(request)
+    config = get_config(request)
+    live = [
+        {
+            "id": s.id,
+            "mode": s.mode,
+            "slug": s.slug,
+            "cols": s.cols,
+            "rows": s.rows,
+            "attached": s.detached_at is None,
+            "tmux_name": s.tmux_name,
+        }
+        for s in registry.all()
+    ]
+    persisted = [{"name": s.name, "slug": s.slug, "attached": s.attached} for s in await registry.list_tmux()]
+    return {
+        "live": live,
+        "persisted": persisted,
+        "tmux_available": tmux.available(),
+        "tmux_enabled": config.tmux_enabled,
+        "max_sessions": registry.max_sessions,
+    }
+
+
+@router.post("/api/session/{session_id}/detach")
+async def detach_session(
+    session_id: str, request: Request, identity: Identity = Depends(require_auth)
+) -> dict[str, object]:
+    registry = get_registry(request)
+    session = registry.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    kept = None
+    if session.is_tmux and session.tmux_name:
+        try:
+            await tmux.detach_session(session.tmux_name)
+            kept = session.slug
+        except tmux.TmuxUnavailable:
+            pass
+    registry.close(session_id)
+    get_audit(request).record("session.detached", session_id=session_id, slug=kept, login=identity.login)
+    return {"status": "detached", "session_id": session_id, "kept_alive": kept}
+
+
 @router.post("/api/session/{session_id}/kill")
 async def kill_session(
     session_id: str, request: Request, identity: Identity = Depends(require_auth)
@@ -86,7 +150,7 @@ async def kill_session(
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     get_audit(request).record("session.kill", session_id=session_id, login=identity.login)
-    registry.close(session_id)
+    await registry.kill(session_id)
     return {"status": "closed", "session_id": session_id}
 
 
@@ -209,6 +273,8 @@ async def terminal_socket(
 def _info(session) -> SessionInfo:
     return SessionInfo(
         id=session.id,
+        mode=session.mode,
+        slug=session.slug,
         shell=session.shell,
         cols=session.cols,
         rows=session.rows,

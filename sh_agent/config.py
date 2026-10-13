@@ -5,30 +5,13 @@ import socket
 from dataclasses import dataclass, field
 
 from .auth import AuthConfig
+from .env import bool_env as _bool_env
+from .env import float_env as _float_env
+from .env import int_env as _int_env
 
 DEFAULT_PORT = 8765
 DEFAULT_PALETTE_PATH = os.path.expanduser("~/.config/sh/palette.json")
 DEFAULT_AUDIT_PATH = os.path.expanduser("~/.local/state/sh/audit.log")
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _float_env(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
 
 
 def tailnet_address() -> str | None:
@@ -59,6 +42,16 @@ class Config:
     max_sessions: int = field(default_factory=lambda: _int_env("SH_MAX_SESSIONS", 8))
     ring_capacity: int = field(default_factory=lambda: _int_env("SH_RING_CAPACITY", 256 * 1024))
     auth: AuthConfig = field(default_factory=AuthConfig.from_env)
+    tmux_enabled: bool = field(default_factory=lambda: _bool_env("SH_TMUX_ENABLED", True))
+    tmux_max_sessions: int = field(default_factory=lambda: _int_env("SH_TMUX_MAX_SESSIONS", 12))
+    tmux_idle_ttl: float = field(default_factory=lambda: _float_env("SH_TMUX_IDLE_TTL", 3600.0))
+
+    @property
+    def tmux_secret(self) -> str:
+        configured = os.environ.get("SH_TMUX_SECRET")
+        if configured:
+            return configured
+        return self.auth.token or "sh-default"
 
     @property
     def public_bind(self) -> str:

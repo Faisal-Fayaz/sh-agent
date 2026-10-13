@@ -7,20 +7,11 @@ import os
 import socket
 from dataclasses import dataclass, field
 
+from .env import bool_env as _bool_env
+from .env import list_env as _list_env
+
 TAILSCALE_SOCKET = "/var/run/tailscale/tailscaled.sock"
 LOCALAPI_PREFIX = "/localapi/v0"
-
-
-def _bool_env(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _list_env(name: str) -> list[str]:
-    raw = os.environ.get(name, "")
-    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 @dataclass

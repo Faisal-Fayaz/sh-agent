@@ -79,6 +79,10 @@ rather than `0.0.0.0`, so it is never exposed off-tailnet. Set `SH_ALLOW_LAN=1` 
 | `SH_RING_CAPACITY` | `262144` | Replay buffer bytes per session |
 | `SH_TAILSCALE_REQUIRE` | unset | Reject peers whose identity can't be verified |
 | `SH_TAILSCALE_ALLOW` | unset | Comma-separated allowlist of tailnet logins |
+| `SH_TMUX_ENABLED` | `1` | Offer tmux-backed named sessions |
+| `SH_TMUX_SECRET` | derived from `SH_TOKEN` | Secret for namespacing tmux session names |
+| `SH_TMUX_MAX_SESSIONS` | `12` | Cap on persisted tmux sessions |
+| `SH_TMUX_IDLE_TTL` | `3600` | Seconds an unattached tmux session may linger (see below) |
 
 ## Protocol
 
@@ -146,6 +150,29 @@ network flaps.
 7. Sessions are capped and reaped; children are killed via `killpg` so no shell outlives its
    session.
 
+## Two session modes
+
+| | `pty` (default) | `tmux` |
+|---|---|---|
+| Persistence | Survives a disconnect for `SH_DETACH_GRACE` | Survives indefinitely |
+| Identity | Anonymous, per connection | Named, stable |
+| Reconnect | Byte-offset replay into a ring buffer | `tmux new-session -A` reattaches |
+| Scrollback | Replayed since the last disconnect | tmux's own, including across app restarts |
+| Best for | Ad-hoc commands | Long-running work you come back to |
+
+tmux mode is the same `PtySession` with its command set to `tmux new-session -A -s <name>`, so it
+reuses the entire streaming path rather than introducing a second one.
+
+**Namespacing.** `tmux new-session -A` attaches to *any* session with a matching name, so an
+un-namespaced slug would let anyone holding a token attach to another holder's session. Slugs are
+therefore mapped to `sh-<hmac8(secret, slug)>-<slug>`: readable in `tmux ls`, unguessable to a
+client that does not hold the secret. The default secret derives from `SH_TOKEN`, so everyone
+sharing a token shares a namespace — set `SH_TMUX_SECRET` for isolation.
+
+**Lifecycle.** tmux sessions outlive everything, which is the point and the hazard. The sweeper caps
+them at `SH_TMUX_MAX_SESSIONS` and only ever kills sessions with **no attached client** — an
+explicit `kill` removes the tmux session itself, while `detach` deliberately leaves it running.
+
 ### Socket lifetime
 
 Killing or reaping a session **closes its WebSocket** with code `4404`. Without that, the client
@@ -180,7 +207,15 @@ export SH_TOKEN=$(.venv/bin/python -m sh_agent --generate-token)
 .venv/bin/python scripts/verify_m1.py               # 23 checks: shell, resize, auth, resume
 .venv/bin/python scripts/verify_resume.py           # 10 checks: drop mid-stream, zero loss
 .venv/bin/python scripts/verify_resume_eviction.py  # 11 checks: resume from an evicted offset
+.venv/bin/python scripts/verify_tmux.py                # 18 checks: named sessions end to end
 ```
+
+New API:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/sessions` | List live PTY sessions and persisted tmux sessions |
+| `POST` | `/api/session/{id}/detach` | Drop the socket but keep a tmux session running |
 
 ## Roadmap
 
