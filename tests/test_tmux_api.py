@@ -547,8 +547,8 @@ def test_tmux_mode_can_be_disabled() -> None:
     config = Config(
         host="127.0.0.1",
         port=0,
-        palette_path=str("/tmp/sh-disabled-palette.json"),
-        audit_path=str("/tmp/sh-disabled-audit.log"),
+        palette_path="/tmp/sh-disabled-palette.json",
+        audit_path="/tmp/sh-disabled-audit.log",
         tmux_enabled=False,
     )
     config.auth = AuthConfig(token=TOKEN, tailscale_require=False)
@@ -569,7 +569,6 @@ def test_tmux_mode_can_be_disabled() -> None:
 @needs_tmux
 def test_the_idle_ttl_actually_expires_sessions() -> None:
     """A session nothing is attached to must be reaped once the TTL passes."""
-    import time as time_mod
 
     async def run() -> tuple[str, list[str]]:
         namer = tmux.SlugNamer("ttl-secret")
