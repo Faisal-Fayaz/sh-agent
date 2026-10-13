@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import re
+import subprocess
 
 import pytest
 from fastapi.testclient import TestClient
 
 from sh_agent import tmux
+from sh_agent.pty_session import PtySession
 from sh_agent.registry import SessionRegistry
 
 TOKEN = "test-token-abcdefghijklmnop"
@@ -445,3 +449,90 @@ def test_the_cap_blocks_new_names_but_not_reopening() -> None:
     assert name == again, "reopening the same slug must reuse the tmux session"
     assert blocked, "a genuinely new slug must still hit the cap"
     assert held == 1, f"reopening should leave one live entry, not {held}"
+
+
+def _tmux_window_size(name: str) -> tuple[int, int]:
+    """Ask tmux directly, rather than trusting the size the session believes it has."""
+    out = subprocess.run(
+        ["tmux", "list-windows", "-t", name, "-F", "#{window_width}x#{window_height}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    cols, rows = out.split("x")
+    return int(cols), int(rows)
+
+
+@needs_tmux
+def test_resizing_a_tmux_session_resizes_the_tmux_window(tmp_path) -> None:
+    """tmux learns the new size only if the child owns a controlling terminal."""
+
+    async def run() -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+        namer = tmux.SlugNamer("resize-secret")
+        name = namer.qualify("resize")
+        await tmux.kill_session(name)
+        registry = SessionRegistry(
+            loop=asyncio.get_running_loop(),
+            namer=namer,
+            tmux_max_sessions=4,
+        )
+        session = await registry.create(cols=30, rows=10, mode="tmux", slug="resize")
+        for _ in range(60):
+            if await tmux.has_session(name):
+                break
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
+        spawned = _tmux_window_size(name)
+
+        session.resize(48, 21)
+        for _ in range(60):
+            if _tmux_window_size(name) != spawned:
+                break
+            await asyncio.sleep(0.1)
+
+        resized = _tmux_window_size(name)
+        believed = (session.cols, session.rows)
+        await registry.kill(session.id)
+        await tmux.kill_session(name)
+        return spawned, resized, believed
+
+    spawned, resized, believed = asyncio.run(run())
+    assert believed == (48, 21), f"the session should record the resize, got {believed}"
+    assert resized == (48, 20), (
+        f"tmux ignored the resize: window was {spawned} and stayed there instead of "
+        f"becoming 48x20 (one row is the status line)"
+    )
+
+
+def test_resizing_a_pty_delivers_sigwinch_to_the_shell() -> None:
+    """A plain shell must observe the new size too, which rides on the same signal."""
+
+    async def run() -> str:
+        loop = asyncio.get_running_loop()
+        chunks: list[str] = []
+
+        async def sender(message):
+            data = message.model_dump(exclude_none=True).get("data")
+            if data:
+                chunks.append(data)
+
+        session = PtySession(session_id="winsize", loop=loop, shell="/bin/bash", cols=30, rows=10)
+        await session.open()
+        session.attach(sender)
+        # bash services traps between foreground commands, so the sleep is short enough
+        # that it returns and the trap runs while we are still reading.
+        session.write(b"trap 'stty size' WINCH; stty size; sleep 1\n")
+        await asyncio.sleep(0.5)
+        session.resize(48, 21)
+
+        text = ""
+        for _ in range(100):
+            text = "".join(base64.b64decode(c).decode(errors="replace") for c in chunks)
+            if re.search(r"\b21 48\b", text):
+                break
+            await asyncio.sleep(0.1)
+        session.close()
+        return text
+
+    text = asyncio.run(run())
+    assert re.search(r"\b21 48\b", text), f"shell never saw the resize; output was: {text!r}"

@@ -20,6 +20,26 @@ DEFAULT_TERM = "xterm-256color"
 Sender = Callable[[ServerMessage], Awaitable[None]]
 
 
+def _claim_controlling_tty(slave_fd: int) -> Callable[[], None]:
+    """Make the slave pty the child's controlling terminal.
+
+    ``start_new_session=True`` calls setsid(), which leaves the child as a session
+    leader with no controlling terminal. Without one the kernel has no foreground
+    process group, so TIOCSWINSZ updates the stored window size but never delivers
+    SIGWINCH. Programs that poll for it simply never learn about a resize: tmux and
+    every other full-screen app keep rendering for the size they saw at startup.
+
+    This targets the slave fd rather than stdin because CPython runs preexec_fn
+    before it dup2's the standard streams into place, so fd 0 is not yet the pty.
+    """
+
+    def setup() -> None:
+        os.setsid()
+        fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+
+    return setup
+
+
 class RingBuffer:
     def __init__(self, capacity: int = DEFAULT_RING_CAPACITY) -> None:
         self._chunks: deque[bytes] = deque()
@@ -160,7 +180,7 @@ class PtySession:
                 stderr=slave_fd,
                 cwd=self._cwd,
                 env=env,
-                start_new_session=True,
+                preexec_fn=_claim_controlling_tty(slave_fd),
                 close_fds=True,
             )
         finally:
