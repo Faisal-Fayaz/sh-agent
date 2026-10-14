@@ -1,6 +1,6 @@
 [Unit]
 Description=sh-agent (terminal agent for the sh phone client)
-Documentation=https://github.com/OWNER/sh
+Documentation=https://github.com/Faisal-Fayaz/sh-agent
 
 # tailscaled is a system unit, so a user unit cannot order itself against it.
 # If the agent wins the race it falls back to binding localhost, which is silently

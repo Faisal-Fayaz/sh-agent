@@ -3,7 +3,8 @@
 Tailscale-reachable PTY daemon. Gives a phone (or any tailnet peer) an interactive shell plus a
 gesture-friendly command palette API.
 
-Status: agent and app complete. See `sh-app` for the Expo client.
+Status: agent and app complete. The Expo client is at
+[sh-app](https://github.com/Faisal-Fayaz/sh-app).
 
 Gives an Android client a real interactive shell on your machine over your private network:
 gesture-driven control keys, a swipe-to-run command palette, and sessions that survive a network
@@ -46,7 +47,7 @@ Add `SH_WRITE_TOKEN` if you want to edit the command palette from the phone.
 
 ```bash
 # 2. client, in a second terminal
-git clone <your-fork> sh-app && cd sh-app
+git clone https://github.com/Faisal-Fayaz/sh-app.git && cd sh-app
 npm install            # postinstall regenerates the inlined xterm payload
 npx expo start         # scan the QR with Expo Go
 ```
