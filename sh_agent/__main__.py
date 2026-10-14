@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
-import sys
 
 import uvicorn
 
+from . import onboarding
 from .app import create_app
+from .auth import AuthConfig
 from .config import Config, tailnet_address
 
 
@@ -49,23 +50,51 @@ def main() -> int:
         print(config.public_bind)
         return 0
 
-    if not config.auth.token:
-        token = os.environ.get("SH_TOKEN")
-        if not token:
-            print(
-                "refusing to start: SH_TOKEN is not set.\n"
-                "generate one with: python -m sh_agent --generate-token",
-                file=sys.stderr,
-            )
-            return 2
+    # Resolve credentials before building the auth config, so a token generated on
+    # this run is the one the agent actually serves. Environment wins, then a
+    # previously stored token, then a freshly generated one that gets persisted --
+    # a generated token that is not stored leaves the phone's saved copy invalid
+    # the moment this terminal closes, with no way to recover it.
+    credentials = onboarding.load_or_create(
+        env_token=os.environ.get("SH_TOKEN"),
+        env_write_token=os.environ.get("SH_WRITE_TOKEN"),
+    )
+    config.auth = AuthConfig(
+        token=credentials.token,
+        write_token=credentials.write_token,
+        tailscale_require=config.auth.tailscale_require,
+        tailscale_allow=config.auth.tailscale_allow,
+        tailscale_socket=config.auth.tailscale_socket,
+    )
 
     bind = config.public_bind
     tailnet = tailnet_address()
     print(f"sh-agent listening on {bind}:{config.port}")
     if tailnet and bind == tailnet:
-        print(f"reachable from tailnet at ws://{tailnet}:{config.port}")
+        print(f"reachable from tailnet at {bind}:{config.port}")
     if config.allow_lan:
         print("WARNING: LAN binding enabled; the daemon is reachable outside the tailnet")
+
+    # A wildcard bind is what the agent listens on, not what a phone dials, so
+    # the pairing code carries a resolved address or none at all. Printing a code
+    # for 0.0.0.0 would send the user to an address that cannot work.
+    host, source = onboarding.resolve_pairing_host(bind, tailnet)
+    if host:
+        uri = onboarding.pairing_uri(host, config.port, credentials.token, credentials.write_token)
+        if credentials.generated:
+            print(f"generated a new token, stored in {onboarding.DEFAULT_CONFIG_DIR / 'agent.env'}")
+        if source == "lan":
+            print(f"pairing over the local network ({host}); run Tailscale to pair from anywhere")
+        print("\nPair your phone by scanning this, or open the link:\n")
+        print(onboarding.render_qr(uri))
+        print(f"\n{uri}\n")
+    else:
+        print(
+            f"not printing a pairing code: listening on {bind}, which a phone cannot reach.\n"
+            "start with SH_HOST=0.0.0.0 (shared LAN) or run Tailscale for tailnet access."
+        )
+    print()
+
     if config.auth.write_token:
         print("palette write access: ENABLED")
     else:

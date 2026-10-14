@@ -15,16 +15,34 @@ You need Python 3.11+, the client repo, and either Tailscale or a shared LAN.
 
 ```bash
 # 1. agent
-uv venv && uv pip install -e ".[dev]"
-export SH_TOKEN="$(uv run python -m sh_agent --generate-token)"
-export SH_WRITE_TOKEN="$(uv run python -m sh_agent --generate-token)"   # optional
-export SH_HOST=0.0.0.0 SH_ALLOW_LAN=1     # only if you are not on Tailscale
-uv run python -m sh_agent
+uv venv && uv pip install -e "."
+uv run python -m sh_agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
 ```
 
-The agent prints the address it bound to. With Tailscale running that is your `100.x` address and
-you can skip the `SH_HOST` line entirely — that is the intended setup and the one the security
-model assumes.
+There is no token to generate and nothing to copy into your shell. The agent creates one on first
+run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code:
+
+```
+sh-agent listening on 0.0.0.0:8765
+pairing over the local network (172.20.10.3); run Tailscale to pair from anywhere
+
+Pair your phone by scanning this, or open the link:
+
+█████████████████████████████████████████████
+██ ▄▄▄▄▄ █ ▀ ▄▄▄▀▄ ▀█▀▀▄▀ ▀██▀▀▀█ ▄▄▄▄▄ ██
+...
+
+sh://connect?host=172.20.10.3&port=8765&token=...
+```
+
+Scan it with the app and you are connected. The token persists, so restarting the agent does not
+invalidate a phone that is already paired.
+
+With Tailscale running the same command needs no `SH_HOST` at all: the agent binds your `100.x`
+tailnet address and the pairing code carries that instead, which is the only version that also
+works once you leave the house.
+
+Add `SH_WRITE_TOKEN` if you want to edit the command palette from the phone.
 
 ```bash
 # 2. client, in a second terminal
@@ -33,8 +51,8 @@ npm install            # postinstall regenerates the inlined xterm payload
 npx expo start         # scan the QR with Expo Go
 ```
 
-In the app: **Host** the printed address, **Port** `8765`, **Token** the `SH_TOKEN` you generated.
-Leave the Write token blank unless you want to edit the palette from the phone.
+In the app, tap **Scan to pair** and point the camera at the terminal. If the camera is
+unavailable, **Enter manually** takes the same host, port and token by hand.
 
 Verify it worked:
 
@@ -66,16 +84,16 @@ started by hand dies with the terminal. A **user** unit needs no root and surviv
 reboots once you log in or enable lingering:
 
 ```bash
+uv tool install --force .
 install -Dm755 systemd/sh-agent.service ~/.config/systemd/user/sh-agent.service
-mkdir -p ~/.config/sh ~/.local/state/sh
-printf 'SH_TOKEN=%s\n' "$(.venv/bin/sh-agent --generate-token)" > ~/.config/sh/agent.env
-chmod 600 ~/.config/sh/agent.env
 systemctl --user daemon-reload && systemctl --user enable --now sh-agent
 loginctl enable-linger "$USER"    # optional: keep it running without a login session
 ```
 
-The token lives in `~/.config/sh/agent.env` rather than the unit file so it is not
-baked into something that gets copied around. The agent refuses to start without one.
+`uv tool install` puts the `sh-agent` binary on `PATH` at `~/.local/bin`, which is what the unit
+runs. The token is not in the unit at all: run the agent once and it writes
+`~/.config/sh/agent.env` (mode 0600), which the unit then loads. That is what stops restarting
+the agent from invalidating a phone that is already paired.
 
 **One ordering caveat.** `tailscaled` is a system unit, so a user unit cannot order
 itself against it. If the agent wins that race on boot it binds `127.0.0.1` instead of
