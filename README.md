@@ -15,10 +15,12 @@ drop without losing scrollback.
 You need Python 3.11+, the client repo, and either Tailscale or a shared LAN.
 
 ```bash
-# 1. agent
-uv venv && uv pip install -e "."
-uv run python -m sh_agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
+curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
+sh-agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
 ```
+
+Or from a clone, `./scripts/install.sh`. The installer picks `uv` or `pipx` if you have
+either and falls back to a virtualenv if you do not.
 
 There is no token to generate and nothing to copy into your shell. The agent creates one on first
 run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code:
@@ -50,6 +52,12 @@ Add `SH_WRITE_TOKEN` if you want to edit the command palette from the phone.
 git clone https://github.com/Faisal-Fayaz/sh-app.git && cd sh-app
 npm install            # postinstall regenerates the inlined xterm payload
 npx expo start         # scan the QR with Expo Go
+```
+
+Or install a standalone build instead of running Expo Go:
+
+```bash
+npx eas-cli@latest build --platform android --profile preview
 ```
 
 In the app, tap **Scan to pair** and point the camera at the terminal. If the camera is

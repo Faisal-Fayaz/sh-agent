@@ -1,13 +1,38 @@
 [project]
 name = "sh-agent"
 version = "0.1.0"
-description = "Tailscale-reachable PTY agent with a gesture-friendly command palette API"
+description = "Gesture-friendly terminal agent. Gives a phone a real interactive shell on your machine over Tailscale."
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Faisal Fayaz" }]
+keywords = ["terminal", "pty", "tmux", "tailscale", "mobile", "ssh"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: No Input/Output (Daemon)",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Terminals :: Terminal Emulators/X Terminals",
+    "Topic :: System :: Shells",
+    "Topic :: Utilities",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "segno>=1.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Faisal-Fayaz/sh-agent"
+Repository = "https://github.com/Faisal-Fayaz/sh-agent"
+Issues = "https://github.com/Faisal-Fayaz/sh-agent/issues"
+Client = "https://github.com/Faisal-Fayaz/sh-app"
 
 [project.optional-dependencies]
 dev = [
