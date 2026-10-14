@@ -83,9 +83,11 @@ def load_or_create(
 ) -> Credentials:
     """Resolve credentials from the environment, falling back to a stored file.
 
-    Environment variables win so a user can override without editing anything.
-    When neither is set a token is generated and persisted, because a generated
-    token that is not stored is worse than no token at all.
+    Precedence is environment, then a previously stored token, then a freshly
+    generated one. Only the generated token is ever written back: an environment
+    variable is a per-run override, and persisting it would let a value that
+    happened to be set for one invocation -- a test harness, a shell export --
+    silently become permanent configuration.
     """
     directory = config_dir or DEFAULT_CONFIG_DIR
     path = directory / "agent.env"
@@ -105,13 +107,6 @@ def load_or_create(
         except OSError:
             # A read-only home should not stop the agent from running; the token
             # is printed in that case so the user can still pair.
-            pass
-
-    if write_token and "SH_WRITE_TOKEN" not in stored:
-        stored["SH_WRITE_TOKEN"] = write_token
-        try:
-            _write_env_file(path, stored)
-        except OSError:
             pass
 
     return Credentials(token=token, write_token=write_token, generated=generated)

@@ -12,6 +12,49 @@ from .auth import AuthConfig
 from .config import Config, tailnet_address
 
 
+def _pairing_banner(
+    bind: str,
+    port: int,
+    token: str,
+    write_token: str | None,
+    generated: bool = False,
+) -> None:
+    """Print the address, a scannable code, and a copy-pasteable link.
+
+    Every line is flushed as it is produced. The agent runs forever afterwards, so
+    anything left in a buffer would never reach the user -- and the QR is the one
+    piece of output somebody cannot wait for.
+    """
+    tailnet = tailnet_address()
+    print(f"sh-agent listening on {bind}:{port}", flush=True)
+    if tailnet and bind == tailnet:
+        print(f"reachable from tailnet at {bind}:{port}", flush=True)
+
+    host, source = onboarding.resolve_pairing_host(bind, tailnet)
+    if not host:
+        print(
+            f"not printing a pairing code: listening on {bind}, which a phone cannot reach.\n"
+            "start with SH_HOST=0.0.0.0 (shared LAN) or run Tailscale for tailnet access.",
+            flush=True,
+        )
+        return
+
+    uri = onboarding.pairing_uri(host, port, token, write_token)
+    if generated:
+        print(
+            f"generated a new token, stored in {onboarding.DEFAULT_CONFIG_DIR / 'agent.env'}",
+            flush=True,
+        )
+    if source == "lan":
+        print(
+            f"pairing over the local network ({host}); run Tailscale to pair from anywhere",
+            flush=True,
+        )
+    print("\nPair your phone by scanning this, or open the link:\n", flush=True)
+    print(onboarding.render_qr(uri), flush=True)
+    print(f"\n{uri}\n", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="sh-agent")
     parser.add_argument("--host", default=None)
@@ -23,6 +66,11 @@ def main() -> int:
     parser.add_argument("--audit", default=None)
     parser.add_argument("--generate-token", action="store_true")
     parser.add_argument("--print-bind", action="store_true")
+    parser.add_argument(
+        "--pairing",
+        action="store_true",
+        help="print the pairing code for the current token and exit",
+    )
     args = parser.parse_args()
 
     if args.generate_token:
@@ -68,37 +116,22 @@ def main() -> int:
     )
 
     bind = config.public_bind
-    tailnet = tailnet_address()
-    print(f"sh-agent listening on {bind}:{config.port}")
-    if tailnet and bind == tailnet:
-        print(f"reachable from tailnet at {bind}:{config.port}")
-    if config.allow_lan:
-        print("WARNING: LAN binding enabled; the daemon is reachable outside the tailnet")
 
-    # A wildcard bind is what the agent listens on, not what a phone dials, so
-    # the pairing code carries a resolved address or none at all. Printing a code
-    # for 0.0.0.0 would send the user to an address that cannot work.
-    host, source = onboarding.resolve_pairing_host(bind, tailnet)
-    if host:
-        uri = onboarding.pairing_uri(host, config.port, credentials.token, credentials.write_token)
-        if credentials.generated:
-            print(f"generated a new token, stored in {onboarding.DEFAULT_CONFIG_DIR / 'agent.env'}")
-        if source == "lan":
-            print(f"pairing over the local network ({host}); run Tailscale to pair from anywhere")
-        print("\nPair your phone by scanning this, or open the link:\n")
-        print(onboarding.render_qr(uri))
-        print(f"\n{uri}\n")
-    else:
-        print(
-            f"not printing a pairing code: listening on {bind}, which a phone cannot reach.\n"
-            "start with SH_HOST=0.0.0.0 (shared LAN) or run Tailscale for tailnet access."
-        )
-    print()
+    # --pairing reprints the code without starting a server, so a second phone can
+    # be added, or a lost one replaced, without touching the host.
+    if args.pairing:
+        _pairing_banner(bind, config.port, credentials.token, credentials.write_token, credentials.generated)
+        return 0
+
+    if config.allow_lan:
+        print("WARNING: LAN binding enabled; the daemon is reachable outside the tailnet", flush=True)
+
+    _pairing_banner(bind, config.port, credentials.token, credentials.write_token, credentials.generated)
 
     if config.auth.write_token:
-        print("palette write access: ENABLED")
+        print("palette write access: ENABLED", flush=True)
     else:
-        print("palette write access: disabled (set SH_WRITE_TOKEN to enable)")
+        print("palette write access: disabled (set SH_WRITE_TOKEN to enable)", flush=True)
 
     uvicorn.run(create_app(config), host=bind, port=config.port, log_level="info", access_log=False)
     return 0

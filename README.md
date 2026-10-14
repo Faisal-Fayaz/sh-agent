@@ -41,6 +41,15 @@ sh://connect?host=172.20.10.3&port=8765&token=...
 Scan it with the app and you are connected. The token persists, so restarting the agent does not
 invalidate a phone that is already paired.
 
+Print the code again at any time without restarting anything:
+
+```bash
+sh-agent --pairing
+```
+
+If you start the agent through `scripts/serverctl.sh` the code is echoed to your terminal after
+the health check, since that script backgrounds the agent with its output redirected to a log.
+
 With Tailscale running the same command needs no `SH_HOST` at all: the agent binds your `100.x`
 tailnet address and the pairing code carries that instead, which is the only version that also
 works once you leave the house.

@@ -32,6 +32,7 @@ start_server() {
   echo $! >"$PIDFILE"
   for _ in $(seq 1 50); do
     if curl -fsS -m 1 "http://127.0.0.1:${SH_PORT:-8765}/health" >/dev/null 2>&1; then
+      show_pairing
       return 0
     fi
     sleep 0.2
@@ -39,6 +40,23 @@ start_server() {
   echo "server failed to become healthy; log:" >&2
   cat "$LOGFILE" >&2
   return 1
+}
+
+# Echo the agent's startup banner onto the terminal that ran this script.
+#
+# The agent is backgrounded with its output redirected to the log, so without
+# this the pairing code exists somewhere the user never looks. It is also the
+# only place the QR is visible when starting via this script rather than running
+# sh-agent directly. Kept quiet when the code was suppressed, which is what a
+# loopback bind does.
+show_pairing() {
+  [[ -f "$LOGFILE" ]] || return 0
+  local banner
+  banner="$(sed -n '/^sh-agent listening on/,/^palette write access/p' "$LOGFILE")"
+  [[ -n "$banner" ]] || return 0
+  printf '\n%s\n' "$banner"
+  [[ "$banner" == *"sh://connect?"* ]] && printf '\n  scan it in the app, or run: sh-agent --pairing\n'
+  printf '\n'
 }
 
 case "${1:-}" in

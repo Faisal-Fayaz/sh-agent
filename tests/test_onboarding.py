@@ -33,11 +33,35 @@ def test_the_environment_overrides_a_stored_token(tmp_path) -> None:
     assert stored.token in (tmp_path / "agent.env").read_text(encoding="utf-8")
 
 
-def test_the_write_token_persists_too(tmp_path) -> None:
-    creds = onboarding.load_or_create(config_dir=tmp_path, env_write_token="write-me")
-    assert creds.write_token == "write-me"
+def test_a_hand_written_write_token_is_honoured(tmp_path) -> None:
+    """A write token placed in agent.env by the user still enables palette writes."""
+    (tmp_path / "agent.env").write_text(
+        "SH_TOKEN=stored-token\nSH_WRITE_TOKEN=stored-write\n", encoding="utf-8"
+    )
+    creds = onboarding.load_or_create(config_dir=tmp_path)
+    assert creds.token == "stored-token"
+    assert creds.write_token == "stored-write"
+
+
+def test_an_inherited_write_token_is_not_persisted(tmp_path) -> None:
+    """An environment variable is a per-run override, not configuration.
+
+    Persisting it let a four-character value from a test harness become permanent
+    palette-write access on the machine that ran the test.
+    """
+    creds = onboarding.load_or_create(config_dir=tmp_path, env_write_token="from-the-environment")
+    assert creds.write_token == "from-the-environment", "it must still apply to this run"
+    stored = (tmp_path / "agent.env").read_text(encoding="utf-8")
+    assert "SH_WRITE_TOKEN" not in stored, "but it must not outlive the run"
+
     again = onboarding.load_or_create(config_dir=tmp_path)
-    assert again.write_token == "write-me"
+    assert again.write_token is None, "and it must not come back on the next run"
+
+
+def test_an_inherited_token_is_not_persisted_either(tmp_path) -> None:
+    creds = onboarding.load_or_create(config_dir=tmp_path, env_token="from-env")
+    assert creds.token == "from-env"
+    assert not (tmp_path / "agent.env").exists(), "nothing to store, so nothing should be written"
 
 
 def test_the_token_file_is_not_world_readable(tmp_path) -> None:
