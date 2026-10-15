@@ -105,6 +105,7 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
     warn "$BIN_DIR is not on your PATH"
+    # shellcheck disable=SC2016  # $HOME and $PATH are literal text for the user to paste
     printf '  add this to your shell profile:\n    export PATH="$HOME/.local/bin:$PATH"\n' >&2
     ;;
 esac
@@ -140,7 +141,8 @@ fi
 # Only offered on Linux, and only actually done if systemd is there. macOS
 # would need a launchd plist, which is not written here rather than written
 # wrongly: a broken service file is worse than none.
-if [ "$PLATFORM" = "linux" ] && command -v systemctl >/dev/null 2>&1 && [ -d "$HOME/.config/systemd/user" -o -d "$HOME/.config/systemd" ]; then
+if [ "$PLATFORM" = "linux" ] && command -v systemctl >/dev/null 2>&1 \
+   && { [ -d "$HOME/.config/systemd/user" ] || [ -d "$HOME/.config/systemd" ]; }; then
   UNIT_SRC="$SOURCE_DIR/systemd/sh-agent.service"
   if [ -f "$UNIT_SRC" ]; then
     mkdir -p "$HOME/.config/systemd/user"

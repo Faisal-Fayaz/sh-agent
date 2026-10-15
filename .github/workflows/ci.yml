@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.11 and the classifier list claims 3.13, so all
+        # three are checked. 3.11 is the one that catches syntax that crept in
+        # from a newer interpreter without a test noticing.
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv python install ${{ matrix.python }}
+
+      # --frozen fails rather than silently re-resolving, so a lockfile that no
+      # longer matches pyproject.toml breaks the build instead of drifting.
+      - run: uv sync --frozen --extra dev --python ${{ matrix.python }}
+
+      # The suite includes a fake tailscaled socket, so it needs no network and
+      # no daemon: the identity path is exercised on a bare runner.
+      - run: uv run --frozen pytest -q
+
+      - run: uv run --frozen ruff check .
+
+      - run: uv run --frozen ruff format --check .
+
+  installer:
+    name: installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: bash -n scripts/install.sh
+
+      - run: bash -n scripts/serverctl.sh
+
+      # ubuntu-latest ships shellcheck. It is worth gating on: install.sh is the
+      # first thing a new user runs, and it is the only file here with no tests.
+      - run: shellcheck scripts/install.sh scripts/serverctl.sh

@@ -102,9 +102,7 @@ def test_stored_settings_apply_but_never_beat_the_environment(tmp_path) -> None:
     EnvironmentFile=, so running `sh-agent` by hand silently dropped the lockdown
     while looking identical from the outside.
     """
-    (tmp_path / "agent.env").write_text(
-        "SH_TOKEN=t\nSH_TAILSCALE_REQUIRE=1\n", encoding="utf-8"
-    )
+    (tmp_path / "agent.env").write_text("SH_TOKEN=t\nSH_TAILSCALE_REQUIRE=1\n", encoding="utf-8")
     saved = os.environ.get("SH_TAILSCALE_REQUIRE")
     os.environ.pop("SH_TAILSCALE_REQUIRE", None)
     try:

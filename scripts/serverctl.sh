@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
 RUN_DIR="/tmp/sh-agent-run"
 PIDFILE="$RUN_DIR/pid"
