@@ -49,7 +49,7 @@ sh-agent                          # prints a pairing code; Ctrl-C to stop
 ```
 
 It prints a code your phone scans. With Tailscale running on this machine and your phone it uses
-your tailnet address, so the code keeps working away from home; otherwise it uses your local
+your tailnet name, so the code keeps working away from home; otherwise it uses your local
 network address, which works while both are on the same Wi-Fi. It says which one it picked.
 
 Both come from [PyPI](https://pypi.org/project/sh-agent) and need only Python 3.11+. If you would
@@ -90,8 +90,9 @@ If you start the agent through `scripts/serverctl.sh` the code is echoed to your
 the health check, since that script backgrounds the agent with its output redirected to a log.
 
 With Tailscale running the same command needs no `SH_HOST` at all: the agent binds your `100.x`
-tailnet address and the pairing code carries that instead, which is the only version that also
-works once you leave the house.
+tailnet address, and the pairing code carries your MagicDNS name instead of a raw address. That is
+the only version that also works once you leave the house, and it survives the address changing,
+which Tailscale does not promise it won't.
 
 Then scan the code with the app — tap **Scan to pair** and point the camera at the terminal. If
 the camera is unavailable, **Enter manually** takes the same host, port and token by hand.
@@ -120,7 +121,9 @@ There is no `SH_TOKEN` to set. To pin one for a single run instead, export `SH_T
 overrides the stored value without replacing it.
 
 With Tailscale running and no `SH_HOST` set, the agent binds to your tailnet address (`100.x.y.z`)
-rather than `0.0.0.0`, so it is never exposed off-tailnet. Set `SH_ALLOW_LAN=1` to override (dev only).
+rather than `0.0.0.0`, so it is never exposed off-tailnet, and it puts your MagicDNS name in the
+pairing code. Set `SH_ALLOW_LAN=1` to bind every interface anyway (dev only); with no tailnet at
+all that is the default, and the agent says so at startup.
 
 ## Running it always
 
@@ -136,15 +139,17 @@ loginctl enable-linger "$USER"    # optional: keep it running without a login se
 ```
 
 `uv tool install` puts the `sh-agent` binary on `PATH` at `~/.local/bin`, which is what the unit
-runs. The token is not in the unit at all: run the agent once and it writes
-`~/.config/sh/agent.env` (mode 0600), which the unit then loads. That is what stops restarting
-the agent from invalidating a phone that is already paired.
+runs. The token is neither in the unit nor in the agent's process environment: the agent reads
+`~/.config/sh/agent.env` (mode 0600) itself. That keeps the token out of every shell the agent
+spawns, and it is what stops a restart from invalidating a phone that is already paired.
 
 **One ordering caveat.** `tailscaled` is a system unit, so a user unit cannot order
-itself against it. If the agent wins that race on boot it binds `127.0.0.1` instead of
-the tailnet address, which is silently unreachable from the phone. The agent prints
-the address it bound to, so check that line after a reboot; if it says `127.0.0.1`
-while you are on a tailnet, run `systemctl --user restart sh-agent`.
+itself against it. If the agent wins that race on boot there is no tailnet yet, so it
+falls back to listening on every interface rather than the tailnet address. That still
+reaches your phone on the same Wi-Fi, but the address in the code is not the one your
+phone saved. The agent prints the address it bound to, so check that line after a
+reboot; if it names the local network while you expected the tailnet, run
+`systemctl --user restart sh-agent`.
 
 ## Configuration
 
@@ -152,9 +157,9 @@ while you are on a tailnet, run `systemctl --user restart sh-agent`.
 |---|---|---|
 | `SH_TOKEN` | — | **Required.** Bearer token for all access |
 | `SH_WRITE_TOKEN` | unset | Enables palette write endpoints. Unset ⇒ 403 |
-| `SH_HOST` | `127.0.0.1` | Bind address when not on a tailnet |
+| `SH_HOST` | unset | Bind address. Unset ⇒ the tailnet address, or every interface when there is no tailnet |
 | `SH_PORT` | `8765` | Listen port |
-| `SH_ALLOW_LAN` | unset | Bind `0.0.0.0`. Dev only |
+| `SH_ALLOW_LAN` | unset | Bind every interface even when on a tailnet. Dev only |
 | `SH_SHELL` | `/bin/bash -l` | Shell to spawn |
 | `SH_CWD` | — | Default working directory |
 | `SH_PALETTE` | `~/.config/sh/palette.json` | Palette file |
@@ -164,8 +169,8 @@ while you are on a tailnet, run `systemctl --user restart sh-agent`.
 | `SH_REAP_INTERVAL` | `15` | How often the reaper runs |
 | `SH_MAX_SESSIONS` | `8` | Concurrent session cap |
 | `SH_RING_CAPACITY` | `262144` | Replay buffer bytes per session |
-| `SH_TAILSCALE_REQUIRE` | unset | Reject peers whose identity can't be verified |
-| `SH_TAILSCALE_ALLOW` | unset | Comma-separated allowlist of tailnet logins |
+| `SH_TAILSCALE_REQUIRE` | unset | `1` ⇒ refuse any peer whose identity `tailscaled` can't confirm, including off-tailnet ones |
+| `SH_TAILSCALE_ALLOW` | unset | Comma-separated allowlist of tailnet logins; unset means any device on the tailnet |
 | `SH_TMUX_ENABLED` | `1` | Offer tmux-backed named sessions |
 | `SH_TMUX_SECRET` | derived from `SH_TOKEN` | Secret for namespacing tmux session names |
 | `SH_TMUX_MAX_SESSIONS` | `12` | Cap on persisted tmux sessions |
@@ -288,7 +293,7 @@ a hot-reload dev loop hits `SH_MAX_SESSIONS` within minutes.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q          # 99 unit + API tests, incl. a fake tailscaled socket
+.venv/bin/python -m pytest -q          # 131 unit + API tests, incl. a fake tailscaled socket
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format .
 

@@ -124,6 +124,17 @@ else
   esac
 fi
 
+# Tailscale is what makes the agent reachable from outside the house, which is
+# the whole point of carrying a terminal in a pocket. Without it the pairing code
+# only works while the phone is on the same Wi-Fi, and nothing says so.
+if command -v tailscale >/dev/null 2>&1; then
+  say "Tailscale found; the agent will bind your tailnet address"
+else
+  warn "Tailscale is not installed; pairing will only work on your local network"
+  printf '  install it and sign in on this machine and your phone:\n' >&2
+  printf '    https://tailscale.com/download\n' >&2
+fi
+
 # --- background service ---------------------------------------------------
 
 # Only offered on Linux, and only actually done if systemd is there. macOS
@@ -154,9 +165,11 @@ Start it with:
     sh-agent
 
 It prints a QR code. With Tailscale running on this machine and on your phone
-it uses your tailnet address, so the code keeps working from anywhere;
-otherwise it uses your local network address, which works while both are on the
-same Wi-Fi. Either way the first run creates a token and stores it in
+it uses your tailnet name, so the code keeps working from anywhere; otherwise it
+uses your local network address, which works while both are on the same Wi-Fi.
+Either way the first run creates a token and stores it in
 ~/.config/sh/agent.env, so restarting the agent never unpairs your phone.
 Open the sh app, tap "Scan to pair", and point the camera at the code.
+
+The token is the only key to this machine, so keep agent.env to yourself.
 EOF
