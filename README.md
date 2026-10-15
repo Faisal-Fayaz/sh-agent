@@ -40,9 +40,11 @@ anywhere) or being on the same Wi-Fi (works at home).
 
 Install the app first:
 
-- **Android** — download the preview APK from the client's README and open it.
-- **iOS** — install Expo Go and scan the QR from `npx expo start`, or see the app README for a
-  standalone build.
+Either platform works for trying it with [Expo Go](https://expo.dev/go): run `npx expo start` in
+the `sh-app` repo and scan the QR with the app on your phone. That is the quickest path on both.
+
+For something installable without a dev server, see the client's README — it covers the Android
+APK and what an iOS build needs.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
@@ -83,17 +85,8 @@ With Tailscale running the same command needs no `SH_HOST` at all: the agent bin
 tailnet address and the pairing code carries that instead, which is the only version that also
 works once you leave the house.
 
-Add `SH_WRITE_TOKEN` if you want to edit the command palette from the phone.
-
-```bash
-# 2. client, in a second terminal
-git clone https://github.com/Faisal-Fayaz/sh-app.git && cd sh-app
-npm install            # postinstall regenerates the inlined xterm payload
-npx expo start         # scan the QR with Expo Go
-```
-
-In the app, tap **Scan to pair** and point the camera at the terminal. If the camera is
-unavailable, **Enter manually** takes the same host, port and token by hand.
+Then scan the code with the app — tap **Scan to pair** and point the camera at the terminal. If
+the camera is unavailable, **Enter manually** takes the same host, port and token by hand.
 
 Verify it worked:
 
@@ -101,7 +94,9 @@ Verify it worked:
 curl -s http://<host>:8765/health | python3 -m json.tool
 ```
 
-## Quick start
+## Running from a clone
+
+For development, where you want the tests and a local checkout:
 
 ```bash
 # uv (lockfile committed, reproducible)
@@ -110,10 +105,11 @@ uv venv && uv pip install -e ".[dev]"
 # or plain pip
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-export SH_TOKEN="$(.venv/bin/python -m sh_agent --generate-token)"
-export SH_WRITE_TOKEN="$(.venv/bin/python -m sh_agent --generate-token)"   # optional
 ./.venv/bin/python -m sh_agent
 ```
+
+There is no `SH_TOKEN` to set. To pin one for a single run instead, export `SH_TOKEN`; it
+overrides the stored value without replacing it.
 
 With Tailscale running and no `SH_HOST` set, the agent binds to your tailnet address (`100.x.y.z`)
 rather than `0.0.0.0`, so it is never exposed off-tailnet. Set `SH_ALLOW_LAN=1` to override (dev only).
