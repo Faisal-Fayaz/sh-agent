@@ -2,11 +2,12 @@
 Description=sh-agent (terminal agent for the sh phone client)
 Documentation=https://github.com/Faisal-Fayaz/sh-agent
 
-# tailscaled is a system unit, so a user unit cannot order itself against it.
-# If the agent wins the race it falls back to binding localhost, which is silently
-# unreachable from the phone. RestartSec plus `systemctl --user restart sh-agent`
-# after `tailscale up` is the escape hatch; the agent prints the address it bound to,
-# so a wrong bind is visible rather than mysterious.
+# tailscaled is a system unit, so a user unit cannot order itself against it. If
+# the agent wins the race it binds the local network instead of the tailnet, which
+# is reachable but not the address your phone saved. RestartSec plus
+# `systemctl --user restart sh-agent` after `tailscale up` is the escape hatch; the
+# agent prints the address it bound to, so a wrong bind is visible rather than
+# mysterious.
 After=network-online.target
 Wants=network-online.target
 
@@ -16,10 +17,13 @@ ExecStart=%h/.local/bin/sh-agent
 Restart=always
 RestartSec=3
 
-# The agent refuses to start without a token. Keep it in a file rather than baking a
-# secret into this unit; create it once with:
+# Settings and the token both come from ~/.config/sh/agent.env, which the agent
+# reads itself -- create the token once with:
 #   sh-agent --generate-token >> ~/.config/sh/agent.env   (then prefix SH_TOKEN=)
-EnvironmentFile=-%h/.config/sh/agent.env
+#
+# Deliberately not EnvironmentFile=: that would put the token in the process
+# environment, and every shell the agent starts would inherit it, handing any
+# script that runs in one the key to the whole machine.
 
 # Sessions are long-lived WebSockets, so the service must not be culled for idleness.
 

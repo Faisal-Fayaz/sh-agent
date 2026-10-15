@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 
 from sh_agent import onboarding
@@ -92,6 +93,52 @@ def test_pairing_uri_encodes_the_token() -> None:
 def test_pairing_uri_omits_an_absent_write_token() -> None:
     uri = onboarding.pairing_uri("10.0.0.1", 8765, "tok")
     assert "wt=" not in uri
+
+
+def test_stored_settings_apply_but_never_beat_the_environment(tmp_path) -> None:
+    """A setting in the file must work the same however the agent was started.
+
+    SH_TAILSCALE_REQUIRE used to reach Config only through the systemd unit's
+    EnvironmentFile=, so running `sh-agent` by hand silently dropped the lockdown
+    while looking identical from the outside.
+    """
+    (tmp_path / "agent.env").write_text(
+        "SH_TOKEN=t\nSH_TAILSCALE_REQUIRE=1\n", encoding="utf-8"
+    )
+    saved = os.environ.get("SH_TAILSCALE_REQUIRE")
+    os.environ.pop("SH_TAILSCALE_REQUIRE", None)
+    try:
+        onboarding.apply_stored_env(config_dir=tmp_path)
+        assert os.environ["SH_TAILSCALE_REQUIRE"] == "1"
+
+        os.environ["SH_TAILSCALE_REQUIRE"] = "0"
+        onboarding.apply_stored_env(config_dir=tmp_path)
+        assert os.environ["SH_TAILSCALE_REQUIRE"] == "0", "an exported value still wins"
+    finally:
+        if saved is None:
+            os.environ.pop("SH_TAILSCALE_REQUIRE", None)
+        else:
+            os.environ["SH_TAILSCALE_REQUIRE"] = saved
+
+
+def test_the_token_is_kept_out_of_the_environment(tmp_path) -> None:
+    """Shells started by the agent inherit its environment, token included.
+
+    Anything running in one of those shells -- a build script, a dependency's
+    postinstall -- would otherwise be handed the key to the machine.
+    """
+    (tmp_path / "agent.env").write_text(
+        "SH_TOKEN=secret-token\nSH_WRITE_TOKEN=secret-write\n", encoding="utf-8"
+    )
+    saved = {key: os.environ.pop(key, None) for key in ("SH_TOKEN", "SH_WRITE_TOKEN")}
+    try:
+        onboarding.apply_stored_env(config_dir=tmp_path)
+        assert "SH_TOKEN" not in os.environ
+        assert "SH_WRITE_TOKEN" not in os.environ
+    finally:
+        for key, value in saved.items():
+            if value is not None:
+                os.environ[key] = value
 
 
 def test_a_wildcard_bind_is_never_offered_as_a_host() -> None:

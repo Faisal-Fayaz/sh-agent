@@ -56,6 +56,27 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+# Read directly from the file by load_or_create, and deliberately kept out of the
+# environment so a shell started by the agent cannot inherit the token.
+_CREDENTIAL_KEYS = frozenset({"SH_TOKEN", "SH_WRITE_TOKEN"})
+
+
+def apply_stored_env(config_dir: Path | None = None) -> None:
+    """Make stored settings visible to Config, without letting them win.
+
+    Under systemd the unit used to get these from EnvironmentFile=, so a setting
+    like SH_TAILSCALE_REQUIRE only took effect if the agent was started that way;
+    running it by hand quietly dropped the lockdown. Both paths must agree, so the
+    agent reads its own file and a variable that is already set still wins -- the
+    same precedence the token uses.
+    """
+    directory = config_dir or DEFAULT_CONFIG_DIR
+    for key, value in _parse_env_file(directory / "agent.env").items():
+        if key in _CREDENTIAL_KEYS:
+            continue
+        os.environ.setdefault(key, value)
+
+
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Written literally, not percent-encoded: systemd parses EnvironmentFile as

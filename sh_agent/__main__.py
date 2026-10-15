@@ -78,6 +78,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Before Config() reads the environment: stored settings have to apply the
+    # same way however the agent was started.
+    onboarding.apply_stored_env()
+
     if args.generate_token:
         print(secrets.token_urlsafe(32))
         return 0
