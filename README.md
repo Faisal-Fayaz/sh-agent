@@ -6,6 +6,9 @@ terminal that keeps its scrollback across a dropped connection.
 
 The client is [`sh-app`](https://github.com/Faisal-Fayaz/sh-app), an Expo app for Android and iOS.
 
+Releases are tagged and published by CI. What changed in each is in the
+[changelog](CHANGELOG.md); 0.1.1 is worth a look if you want to know why it is yanked.
+
 ## Who this is for
 
 Someone already uses a terminal, wants their phone to be a genuinely usable one, and is
