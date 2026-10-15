@@ -117,7 +117,7 @@ started by hand dies with the terminal. A **user** unit needs no root and surviv
 reboots once you log in or enable lingering:
 
 ```bash
-uv tool install --force .
+uv tool install sh-agent          # or: uv tool install --force .
 install -Dm755 systemd/sh-agent.service ~/.config/systemd/user/sh-agent.service
 systemctl --user daemon-reload && systemctl --user enable --now sh-agent
 loginctl enable-linger "$USER"    # optional: keep it running without a login session
