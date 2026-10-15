@@ -11,6 +11,7 @@ import termios
 from collections import deque
 from collections.abc import Awaitable, Callable
 
+from .config import DEFAULT_SHELL
 from .protocol import ServerMessage, stdout_frame
 
 READ_SIZE = 65536
@@ -114,7 +115,7 @@ class PtySession:
     ) -> None:
         self.id = session_id
         self._loop = loop
-        self._shell_argv = shlex.split(shell) if shell else ["/bin/bash", "-l"]
+        self._shell_argv = shlex.split(shell) if shell else shlex.split(DEFAULT_SHELL)
         self.mode = mode
         self.slug = slug
         self.tmux_name = tmux_name

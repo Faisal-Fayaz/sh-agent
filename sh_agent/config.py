@@ -12,6 +12,10 @@ from .env import int_env as _int_env
 DEFAULT_PORT = 8765
 DEFAULT_PALETTE_PATH = os.path.expanduser("~/.config/sh/palette.json")
 DEFAULT_AUDIT_PATH = os.path.expanduser("~/.local/state/sh/audit.log")
+# Named once because three places need it: the session spawner, /health, and the
+# configuration table in the README. Two of those had already drifted apart in
+# spirit -- they agreed only by luck.
+DEFAULT_SHELL = "/bin/bash -l"
 
 
 def tailnet_address() -> str | None:

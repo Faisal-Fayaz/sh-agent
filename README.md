@@ -164,6 +164,7 @@ reboot; if it names the local network while you expected the tailnet, run
 | `SH_CWD` | — | Default working directory |
 | `SH_PALETTE` | `~/.config/sh/palette.json` | Palette file |
 | `SH_AUDIT` | `~/.local/state/sh/audit.log` | Audit log (`SH_AUDIT=""` disables) |
+| `SH_CONFIG_DIR` | `~/.config/sh` | Where the token, palette and settings live |
 | `SH_IDLE_TTL` | `1800` | Seconds before an idle session is reaped |
 | `SH_DETACH_GRACE` | `120` | Seconds a disconnected session survives for reconnect/resume |
 | `SH_REAP_INTERVAL` | `15` | How often the reaper runs |
@@ -171,6 +172,7 @@ reboot; if it names the local network while you expected the tailnet, run
 | `SH_RING_CAPACITY` | `262144` | Replay buffer bytes per session |
 | `SH_TAILSCALE_REQUIRE` | unset | `1` ⇒ refuse any peer whose identity `tailscaled` can't confirm, including off-tailnet ones |
 | `SH_TAILSCALE_ALLOW` | unset | Comma-separated allowlist of tailnet logins; unset means any device on the tailnet |
+| `SH_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | tailscaled's LocalAPI socket |
 | `SH_TMUX_ENABLED` | `1` | Offer tmux-backed named sessions |
 | `SH_TMUX_SECRET` | derived from `SH_TOKEN` | Secret for namespacing tmux session names |
 | `SH_TMUX_MAX_SESSIONS` | `12` | Cap on persisted tmux sessions |
@@ -293,7 +295,7 @@ a hot-reload dev loop hits `SH_MAX_SESSIONS` within minutes.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q          # 131 unit + API tests, incl. a fake tailscaled socket
+.venv/bin/python -m pytest -q          # 135 unit + API tests, incl. a fake tailscaled socket
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format .
 
