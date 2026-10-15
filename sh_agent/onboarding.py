@@ -153,16 +153,22 @@ def local_address() -> str | None:
     return None
 
 
-def resolve_pairing_host(bind: str, tailnet: str | None = None) -> tuple[str | None, str]:
+def resolve_pairing_host(
+    bind: str, tailnet: str | None = None, tailnet_name: str | None = None
+) -> tuple[str | None, str]:
     """Pick an address to put in the pairing code, and say why.
 
     A wildcard bind is what the agent listens on, not what a phone dials, so it
-    never appears in a pairing code. The tailnet address is preferred over the
-    LAN one because it is the only one that also works off the home network.
+    never appears in a pairing code. The tailnet is preferred over the LAN
+    because it is the only one that also works off the home network -- but only
+    when the agent is actually listening there. An explicitly configured address
+    is dialled as given: sending the phone to a tailnet address the agent never
+    bound would be a code that cannot connect.
     """
-    if tailnet and bind != "127.0.0.1":
-        return tailnet, "tailnet"
-    if bind not in ("0.0.0.0", "::", ""):
+    wildcard = bind in ("0.0.0.0", "::", "")
+    if tailnet and (wildcard or bind == tailnet):
+        return tailnet_name or tailnet, "tailnet"
+    if not wildcard:
         if bind in ("127.0.0.1", "::1", "localhost"):
             return None, "loopback"
         return bind, "configured"

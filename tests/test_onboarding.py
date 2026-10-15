@@ -167,6 +167,41 @@ def test_a_configured_address_is_used_as_is() -> None:
     assert source == "configured"
 
 
+def test_the_tailnet_name_is_preferred_over_its_address() -> None:
+    """The address is reassigned when a node re-registers; the name survives."""
+    host, source = onboarding.resolve_pairing_host(
+        "0.0.0.0", tailnet="100.64.0.9", tailnet_name="laptop.example.ts.net"
+    )
+    assert host == "laptop.example.ts.net"
+    assert source == "tailnet"
+
+
+def test_the_tailnet_name_is_ignored_when_the_agent_is_not_on_the_tailnet() -> None:
+    host, source = onboarding.resolve_pairing_host(
+        "192.168.1.50", tailnet="100.64.0.9", tailnet_name="laptop.example.ts.net"
+    )
+    assert host == "192.168.1.50"
+    assert source == "configured"
+
+
+def test_a_configured_address_is_not_replaced_by_the_tailnet() -> None:
+    """The code must point where the agent listens.
+
+    A tailnet address was returned for any bind that was not loopback, so an
+    explicit SH_HOST=192.168.1.50 still produced a code carrying 100.x -- an
+    address nothing was listening on.
+    """
+    host, source = onboarding.resolve_pairing_host("192.168.1.50", tailnet="100.64.0.9")
+    assert host == "192.168.1.50"
+    assert source == "configured"
+
+
+def test_a_tailnet_bind_is_dialled_by_its_own_address() -> None:
+    host, source = onboarding.resolve_pairing_host("100.64.0.9", tailnet="100.64.0.9")
+    assert host == "100.64.0.9"
+    assert source == "tailnet"
+
+
 def test_the_qr_renders_something_scannable() -> None:
     qr = onboarding.render_qr(onboarding.pairing_uri("10.0.0.5", 8765, "tok"))
     assert isinstance(qr, str)

@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
-from sh_agent.auth import AuthConfig, Authenticator, AuthError
+from sh_agent.auth import AuthConfig, Authenticator, AuthError, tailnet_dns_name
 
 TOKEN = "tok-1234567890"
 ALLOWED = "me@example.com"
@@ -33,11 +33,28 @@ EXPECTED_HOST = "local-tailscaled.sock"
 
 
 class _WhoisHandler(BaseHTTPRequestHandler):
+    def _respond(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802
         if self.headers.get("Host") != EXPECTED_HOST:
             self.send_response(403)
             self.end_headers()
             self.wfile.write(b"forbidden")
+            return
+        if self.path.startswith("/localapi/v0/status"):
+            # Fully qualified with a trailing dot, exactly as tailscaled sends it.
+            body = json.dumps(
+                {
+                    "BackendState": self.server.backend_state,  # type: ignore[attr-defined]
+                    "Self": {"DNSName": "faisal.example.ts.net."},
+                }
+            ).encode()
+            self._respond(200, body)
             return
         if "addr=" not in self.path:
             self.send_response(404)
@@ -58,11 +75,7 @@ class _WhoisHandler(BaseHTTPRequestHandler):
                 "UserProfile": {"LoginName": login},
             }
         ).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._respond(200, body)
 
     def log_message(self, *args: object) -> None:
         return
@@ -72,8 +85,9 @@ class _UnixHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, backend_state: str = "Running") -> None:
         self.unix_path = path
+        self.backend_state = backend_state
         super().__init__(("localhost", 0), _WhoisHandler)
 
     def server_bind(self) -> None:
@@ -90,11 +104,12 @@ class _UnixHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 class FakeTailscaled:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, backend_state: str = "Running") -> None:
         self.path = path
+        self.backend_state = backend_state
 
     def __enter__(self) -> FakeTailscaled:
-        self._server = _UnixHTTPServer(self.path)
+        self._server = _UnixHTTPServer(self.path, self.backend_state)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
@@ -183,3 +198,20 @@ def test_write_token_gate_is_independent(socket_path: str) -> None:
         with pytest.raises(AuthError) as excinfo:
             auth.enforce_write(f"Bearer {TOKEN}", "100.64.0.1")
         assert excinfo.value.status_code == 403
+
+
+def test_magic_dns_name_is_read_without_the_root_dot(socket_path: str) -> None:
+    """A pairing code wants a dialable name, not "faisal.example.ts.net."."""
+    with FakeTailscaled(socket_path):
+        assert tailnet_dns_name(socket_path) == "faisal.example.ts.net"
+
+
+def test_magic_dns_name_is_absent_when_the_socket_is(socket_path: str) -> None:
+    """No Tailscale is an ordinary state, not something to fail a pairing over."""
+    assert tailnet_dns_name(socket_path) is None
+
+
+def test_magic_dns_name_is_absent_when_the_backend_is_down(socket_path: str) -> None:
+    """A logged-out daemon still has a socket and still answers, with no name to give."""
+    with FakeTailscaled(socket_path, backend_state="Stopped"):
+        assert tailnet_dns_name(socket_path) is None

@@ -79,16 +79,46 @@ class TailscaleWhois:
         return os.path.exists(self._socket_path)
 
     def lookup(self, addr: str) -> dict[str, object]:
-        conn = _UnixHTTPConnection(self._socket_path)
-        try:
-            conn.request("GET", f"{LOCALAPI_PREFIX}/whois?addr={addr}")
-            response = conn.getresponse()
-            body = response.read()
-        finally:
-            conn.close()
-        if response.status != 200:
-            raise AuthError(f"whois failed with status {response.status}")
-        return json.loads(body)
+        return localapi_get(self._socket_path, f"/whois?addr={addr}")
+
+
+def localapi_get(socket_path: str, path: str) -> dict[str, object]:
+    """GET a path from the tailscaled localapi over its unix socket."""
+    conn = _UnixHTTPConnection(socket_path)
+    try:
+        conn.request("GET", f"{LOCALAPI_PREFIX}{path}")
+        response = conn.getresponse()
+        body = response.read()
+    finally:
+        conn.close()
+    if response.status != 200:
+        raise AuthError(f"localapi {path} failed with status {response.status}")
+    return json.loads(body)
+
+
+def tailnet_dns_name(socket_path: str = TAILSCALE_SOCKET) -> str | None:
+    """This machine's MagicDNS name, when the tailnet publishes one.
+
+    A pairing code wants this rather than the 100.x address: the address is
+    reassigned when a node re-registers, so a phone that saved it silently stops
+    connecting, while the name survives. Returning None simply leaves the address
+    in use, which is why every failure here is swallowed -- not having a name is
+    an ordinary state, not an error worth stopping a pairing for.
+    """
+    if not os.path.exists(socket_path):
+        return None
+    try:
+        status = localapi_get(socket_path, "/status")
+    except (AuthError, OSError, ValueError):
+        return None
+    if status.get("BackendState") != "Running":
+        return None
+    node = status.get("Self")
+    name = node.get("DNSName") if isinstance(node, dict) else None
+    if not isinstance(name, str):
+        return None
+    # DNSName is fully qualified, with the root dot Tailscale CLI output keeps.
+    return name.rstrip(".") or None
 
 
 class Authenticator:

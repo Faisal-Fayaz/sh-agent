@@ -8,7 +8,7 @@ import uvicorn
 
 from . import onboarding
 from .app import create_app
-from .auth import AuthConfig
+from .auth import AuthConfig, tailnet_dns_name
 from .config import Config, tailnet_address
 
 
@@ -26,11 +26,12 @@ def _pairing_banner(
     piece of output somebody cannot wait for.
     """
     tailnet = tailnet_address()
+    name = tailnet_dns_name() if tailnet else None
     print(f"sh-agent listening on {bind}:{port}", flush=True)
     if tailnet and bind == tailnet:
-        print(f"reachable from tailnet at {bind}:{port}", flush=True)
+        print(f"reachable from tailnet at {name or bind}:{port}", flush=True)
 
-    host, source = onboarding.resolve_pairing_host(bind, tailnet)
+    host, source = onboarding.resolve_pairing_host(bind, tailnet, name)
     if not host:
         print(
             f"not printing a pairing code: bound to {bind}, which a phone cannot reach.\n"
@@ -58,6 +59,12 @@ def _pairing_banner(
     print("\nPair your phone by scanning this, or open the link:\n", flush=True)
     print(onboarding.render_qr(uri), flush=True)
     print(f"\n{uri}\n", flush=True)
+    if tailnet and host != tailnet:
+        print(
+            f"the code uses your tailnet name; if {host} does not resolve on the phone,\n"
+            f"enter {tailnet}:{port} by hand instead.",
+            flush=True,
+        )
 
 
 def main() -> int:
