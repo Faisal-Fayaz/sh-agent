@@ -33,8 +33,13 @@ def _pairing_banner(
     host, source = onboarding.resolve_pairing_host(bind, tailnet)
     if not host:
         print(
-            f"not printing a pairing code: listening on {bind}, which a phone cannot reach.\n"
-            "start with SH_HOST=0.0.0.0 (shared LAN) or run Tailscale for tailnet access.",
+            f"not printing a pairing code: bound to {bind}, which a phone cannot reach.\n"
+            "\n"
+            "Drop SH_HOST and the agent picks an address your phone can dial:\n"
+            "    sh-agent\n"
+            "\n"
+            "Or bind every interface yourself:\n"
+            "    SH_HOST=0.0.0.0 sh-agent",
             flush=True,
         )
         return
@@ -123,8 +128,12 @@ def main() -> int:
         _pairing_banner(bind, config.port, credentials.token, credentials.write_token, credentials.generated)
         return 0
 
-    if config.allow_lan:
-        print("WARNING: LAN binding enabled; the daemon is reachable outside the tailnet", flush=True)
+    if bind in ("0.0.0.0", "::"):
+        print(
+            "WARNING: listening on every interface, so anything on this network can reach the agent.\n"
+            "         the pairing token is still required. set SH_HOST=127.0.0.1 to stay on this machine.",
+            flush=True,
+        )
 
     _pairing_banner(bind, config.port, credentials.token, credentials.write_token, credentials.generated)
 

@@ -27,7 +27,7 @@ def tailnet_address() -> str | None:
 
 @dataclass
 class Config:
-    host: str = field(default_factory=lambda: os.environ.get("SH_HOST", "127.0.0.1"))
+    host: str = field(default_factory=lambda: os.environ.get("SH_HOST") or "")
     port: int = field(default_factory=lambda: _int_env("SH_PORT", DEFAULT_PORT))
     allow_lan: bool = field(
         default_factory=lambda: os.environ.get("SH_ALLOW_LAN", "").lower() in {"1", "true", "yes"}
@@ -55,6 +55,17 @@ class Config:
 
     @property
     def public_bind(self) -> str:
-        if self.allow_lan:
+        """The address to actually listen on.
+
+        An explicit SH_HOST is always honoured, so nothing here surprises anyone
+        who set one. Otherwise Tailscale wins, because a tailnet address is the
+        only one that also works away from home. With neither, the fallback is
+        every interface: loopback would leave the phone with nothing to dial,
+        and an agent started for a phone that no phone can reach has failed at
+        the only thing it was started to do.
+        """
+        if self.host:
             return self.host
-        return tailnet_address() or self.host
+        if self.allow_lan:
+            return "0.0.0.0"
+        return tailnet_address() or "0.0.0.0"

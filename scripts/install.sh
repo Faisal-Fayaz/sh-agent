@@ -153,11 +153,10 @@ Start it with:
 
     sh-agent
 
-On first run it creates a token and prints a QR code. Open the sh app on your
-phone, tap "Scan to pair", and point the camera at that code. The token is
-stored in ~/.config/sh/agent.env, so restarting the agent never unpairs your
-phone.
-
-Reaching it from outside your home network needs Tailscale on both machines;
-run Tailscale first and sh-agent will bind your 100.x address by itself.
+It prints a QR code. With Tailscale running on this machine and on your phone
+it uses your tailnet address, so the code keeps working from anywhere;
+otherwise it uses your local network address, which works while both are on the
+same Wi-Fi. Either way the first run creates a token and stores it in
+~/.config/sh/agent.env, so restarting the agent never unpairs your phone.
+Open the sh app, tap "Scan to pair", and point the camera at the code.
 EOF

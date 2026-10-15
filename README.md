@@ -44,8 +44,13 @@ dev server, the client's README has a standalone Android APK and says what an iO
 
 ```bash
 uv tool install sh-agent          # or: pipx install sh-agent
-sh-agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
+
+sh-agent                          # prints a pairing code; Ctrl-C to stop
 ```
+
+It prints a code your phone scans. With Tailscale running on this machine and your phone it uses
+your tailnet address, so the code keeps working away from home; otherwise it uses your local
+network address, which works while both are on the same Wi-Fi. It says which one it picked.
 
 Both come from [PyPI](https://pypi.org/project/sh-agent) and need only Python 3.11+. If you would
 rather not have a package manager involved:
