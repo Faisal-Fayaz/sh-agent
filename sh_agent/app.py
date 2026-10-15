@@ -13,6 +13,7 @@ from .palette import PaletteStore
 from .registry import AuditLog, SessionRegistry
 from .routes import commands, health, session
 from .tmux import SlugNamer
+from .version import __version__
 
 
 @asynccontextmanager
@@ -62,7 +63,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     resolved = config or Config()
     app = FastAPI(
         title="sh agent",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

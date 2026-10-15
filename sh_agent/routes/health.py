@@ -10,6 +10,7 @@ from ..auth import Authenticator, Identity
 from ..config import Config
 from ..protocol import PROTOCOL_VERSION
 from ..registry import SessionRegistry
+from ..version import __version__
 from .deps import get_audit, get_authenticator, get_config, get_registry, require_auth
 
 router = APIRouter(tags=["meta"])
@@ -23,7 +24,7 @@ async def health(request: Request) -> dict[str, object]:
     return {
         "status": "ok",
         "protocol": PROTOCOL_VERSION,
-        "version": "0.1.0",
+        "version": __version__,
         "sessions": registry.count(),
         "max_sessions": registry.max_sessions,
         "shell": config.shell or "/bin/bash -l",

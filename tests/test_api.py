@@ -62,6 +62,18 @@ def test_health_is_open_and_reports_state(client: TestClient) -> None:
     assert body["tailscale_required"] is False
 
 
+def test_health_reports_the_version_that_was_actually_installed(client: TestClient) -> None:
+    """The version was written out in two more places by hand and had already drifted.
+
+    Anything that reads it back out of the package has to agree with the metadata,
+    or a released build reports a number that is not the one people installed.
+    """
+    from sh_agent import __version__
+
+    assert client.get("/health").json()["version"] == __version__
+    assert __version__ != "0.0.0+unknown", "the test suite runs against an installed package"
+
+
 def test_missing_token_is_rejected(client: TestClient) -> None:
     assert client.get("/whoami").status_code == 401
 

@@ -3,6 +3,7 @@ from .config import Config
 from .protocol import PROTOCOL_VERSION, ClientMessage, ServerMessage
 from .pty_session import PtySession, RingBuffer
 from .registry import AuditLog, SessionRegistry
+from .version import __version__
 
 __all__ = [
     "PROTOCOL_VERSION",
@@ -16,4 +17,5 @@ __all__ = [
     "RingBuffer",
     "ServerMessage",
     "SessionRegistry",
+    "__version__",
 ]
