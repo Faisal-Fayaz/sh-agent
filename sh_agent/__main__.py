@@ -108,7 +108,6 @@ def main() -> int:
         config.palette_path = args.palette
     if args.audit:
         config.audit_path = args.audit
-    config.auth = Config().auth
 
     if args.print_bind:
         print(config.public_bind)
