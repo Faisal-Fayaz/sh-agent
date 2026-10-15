@@ -38,13 +38,9 @@ Everything above is a deliberate boundary, not a bug in disguise.
 You need Python 3.11+ on the host, the app on your phone, and either Tailscale (works from
 anywhere) or being on the same Wi-Fi (works at home).
 
-Install the app first:
-
-Either platform works for trying it with [Expo Go](https://expo.dev/go): run `npx expo start` in
-the `sh-app` repo and scan the QR with the app on your phone. That is the quickest path on both.
-
-For something installable without a dev server, see the client's README — it covers the Android
-APK and what an iOS build needs.
+Install the app first. [Expo Go](https://expo.dev/go) is quickest on both platforms — run
+`npx expo start` in the `sh-app` repo and scan its QR with the app. If you would rather not run a
+dev server, the client's README has a standalone Android APK and says what an iOS build needs.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
