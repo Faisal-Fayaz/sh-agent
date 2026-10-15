@@ -43,12 +43,19 @@ Install the app first. [Expo Go](https://expo.dev/go) is quickest on both platfo
 dev server, the client's README has a standalone Android APK and says what an iOS build needs.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
+uv tool install sh-agent          # or: pipx install sh-agent
 sh-agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
 ```
 
-Or from a clone, `./scripts/install.sh`. The installer picks `uv` or `pipx` if you have
-either and falls back to a virtualenv if you do not.
+Both come from [PyPI](https://pypi.org/project/sh-agent) and need only Python 3.11+. If you would
+rather not have a package manager involved:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
+```
+
+That script picks `uv` or `pipx` if you have either, and falls back to a virtualenv if you do not.
+Running `./scripts/install.sh` from a clone does the same thing.
 
 There is no token to generate and nothing to copy into your shell. The agent creates one on
 first run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code. Open the app,
@@ -317,12 +324,14 @@ one thing that would make `preexec_fn` unsafe.
 
 ## Roadmap
 
-The features are built and verified on hardware. What remains is reach.
+The features are built and verified on hardware, the agent is on PyPI, and the app has a
+standalone Android build. What remains is reach.
 
 - **Windows.** The one real gap. The agent is POSIX-only -- `os.openpty`, `TIOCSCTTY` and
   `killpg` have no Windows equivalent and there is no ConPTY layer, so this is an
   abstraction to write rather than a branch to patch. macOS and Linux are supported today.
-- **PyPI.** The package builds and passes `twine check`; it has not been uploaded.
+- **Store distribution.** The Android build is sideloaded, so Play Protect warns about it, and
+  iOS needs the Apple Developer Program. Both are accounts and review queues, not code.
 - **Wake on demand.** Not implemented, and not a small thing. Wake-on-LAN is a Layer 2
   magic packet and Tailscale is Layer 3, so it cannot be sent over the tunnel at all --
   it needs a second always-on machine whose only job is sending the packet. That machine
