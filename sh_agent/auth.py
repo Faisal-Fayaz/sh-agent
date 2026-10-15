@@ -13,6 +13,11 @@ from .env import list_env as _list_env
 TAILSCALE_SOCKET = "/var/run/tailscale/tailscaled.sock"
 LOCALAPI_PREFIX = "/localapi/v0"
 
+# tailscaled rejects any request whose Host header it does not recognise, as a
+# guard against DNS rebinding. "localhost" included: it answers 403, so identity
+# resolution silently fails while the socket itself looks perfectly reachable.
+LOCALAPI_HOST = "local-tailscaled.sock"
+
 
 @dataclass
 class Identity:
@@ -56,7 +61,7 @@ class AuthConfig:
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
     def __init__(self, socket_path: str, timeout: float = 2.0) -> None:
-        super().__init__("localhost", timeout=timeout)
+        super().__init__(LOCALAPI_HOST, timeout=timeout)
         self._socket_path = socket_path
 
     def connect(self) -> None:
@@ -112,10 +117,17 @@ class Authenticator:
             except Exception:
                 data = None
             if isinstance(data, dict):
-                logins = (data.get("UserProfile") or {}).get("LoginName") or []
+                # LoginName is a bare string in the real API, so indexing it took the
+                # first character -- "F" for "Faisal-Fayaz@github" -- which also made
+                # every SH_TAILSCALE_ALLOW entry unmatchable. A list is still accepted
+                # because that is the shape this code assumed for a while.
+                raw_login = (data.get("UserProfile") or {}).get("LoginName")
+                logins = [raw_login] if isinstance(raw_login, str) else list(raw_login or [])
                 if logins:
                     identity.login = str(logins[0])
-                    identity.node = data.get("NodeName")
+                    # The node is nested, and there is no top-level NodeName to read.
+                    node = data.get("Node") or {}
+                    identity.node = node.get("ComputedName") or node.get("Name")
                     identity.verified_by = "tailscale"
         return identity
 

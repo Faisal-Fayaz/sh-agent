@@ -27,9 +27,18 @@ OTHER = "someone-else@example.com"
 
 HOST_LOGIN = {"100.64.0.1": ALLOWED, "100.64.0.2": OTHER}
 
+# The real daemon answers 403 to any Host it does not recognise. Spelled out here
+# rather than imported from the agent, so a test cannot agree with a wrong value.
+EXPECTED_HOST = "local-tailscaled.sock"
+
 
 class _WhoisHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
+        if self.headers.get("Host") != EXPECTED_HOST:
+            self.send_response(403)
+            self.end_headers()
+            self.wfile.write(b"forbidden")
+            return
         if "addr=" not in self.path:
             self.send_response(404)
             self.end_headers()
@@ -41,7 +50,14 @@ class _WhoisHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"not found")
             return
-        body = json.dumps({"NodeName": f"node-{host}", "UserProfile": {"LoginName": [login]}}).encode()
+        body = json.dumps(
+            {
+                "Node": {"Name": f"node-{host}.example.ts.net.", "ComputedName": f"node-{host}"},
+                # A bare string, which is what the real localapi returns. A list
+                # here let the agent read its first character and still pass.
+                "UserProfile": {"LoginName": login},
+            }
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
