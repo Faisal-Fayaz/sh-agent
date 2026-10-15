@@ -382,6 +382,54 @@ def test_audit_log_creates_missing_directory(tmp_path) -> None:
     assert "probe" in nested.read_text()
 
 
+def test_the_audit_log_is_private_even_under_a_loose_umask(tmp_path) -> None:
+    """It records peer addresses and tailnet logins, so 0664 is not acceptable.
+
+    The file was being created with whatever umask the agent inherited, which is
+    002 on plenty of systems, and nothing about an audit log looks sensitive
+    enough to check until you read what is in it.
+    """
+    from sh_agent.registry import AuditLog
+
+    previous = os.umask(0o002)
+    try:
+        nested = tmp_path / "state" / "audit.log"
+        audit = AuditLog(str(nested))
+        audit.record("auth.ws_denied", peer_ip="100.64.0.9", login="someone@example.com")
+    finally:
+        os.umask(previous)
+
+    assert nested.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "state").stat().st_mode & 0o777 == 0o700
+
+
+def test_an_existing_loose_audit_log_is_tightened(tmp_path) -> None:
+    """A log written by an older version is still a log of who connected."""
+    from sh_agent.registry import AuditLog
+
+    path = tmp_path / "audit.log"
+    path.write_text('{"event": "agent.start"}\n', encoding="utf-8")
+    path.chmod(0o664)
+
+    AuditLog(str(path))
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.read_text(encoding="utf-8") == '{"event": "agent.start"}\n'
+
+
+def test_a_directory_the_user_chose_is_not_rechmodded(tmp_path) -> None:
+    """SH_AUDIT can point anywhere, and that directory is not ours to alter."""
+    from sh_agent.registry import AuditLog
+
+    chosen = tmp_path / "logs"
+    chosen.mkdir()
+    chosen.chmod(0o755)
+
+    AuditLog(str(chosen / "audit.log"))
+
+    assert chosen.stat().st_mode & 0o777 == 0o755
+
+
 def test_audit_log_reports_unwritable_directory(tmp_path) -> None:
     from sh_agent.registry import AuditLog
 

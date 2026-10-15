@@ -321,14 +321,35 @@ class AuditLog:
             return
         directory = os.path.dirname(os.path.abspath(path))
         try:
+            created = not os.path.isdir(directory)
             os.makedirs(directory, exist_ok=True)
+            if created:
+                # Only when we made it. A directory the user pointed us at by
+                # hand is theirs to set the permissions on.
+                os.chmod(directory, 0o700)
         except OSError as exc:
             self.enabled = False
             self.error = f"cannot create audit directory {directory}: {exc}"
             return
+        self._restrict(path)
         if not os.access(directory, os.W_OK):
             self.enabled = False
             self.error = f"audit directory is not writable: {directory}"
+
+    @staticmethod
+    def _restrict(path: str) -> None:
+        """Keep the log as private as the token file.
+
+        Peer addresses and tailnet logins are written here, and the file was
+        created world-readable by the ambient umask -- 0664 on the machine this
+        was written on. The directory it lives in is normally 0700 already, but
+        the file itself should not depend on that. Not being able to tighten it
+        is not a reason to stop logging, so failures are ignored.
+        """
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
     def record(self, event: str, **fields: object) -> None:
         if not self._path or not self.enabled:
@@ -343,7 +364,10 @@ class AuditLog:
         }
         line = json.dumps(entry, sort_keys=True)
         try:
-            with open(self._path, "a", encoding="utf-8") as handle:
+            # O_CREAT's mode applies only at creation, so a first run gets the
+            # right permissions rather than only the run after a restart.
+            descriptor = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         except OSError as exc:
             self.enabled = False
