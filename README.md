@@ -1,18 +1,48 @@
 # sh-agent
 
-Tailscale-reachable PTY daemon. Gives a phone (or any tailnet peer) an interactive shell plus a
-gesture-friendly command palette API.
+A real interactive shell on your own machine, driven from your phone. Run the agent on the
+machine you want a shell into, install the app on your phone, scan a code, and you have a
+terminal that keeps its scrollback across a dropped connection.
 
-Status: agent and app complete. The Expo client is at
-[sh-app](https://github.com/Faisal-Fayaz/sh-app).
+The client is [`sh-app`](https://github.com/Faisal-Fayaz/sh-app), an Expo app for Android and iOS.
 
-Gives an Android client a real interactive shell on your machine over your private network:
-gesture-driven control keys, a swipe-to-run command palette, and sessions that survive a network
-drop without losing scrollback.
+## Who this is for
+
+Someone already uses a terminal, wants their phone to be a genuinely usable one, and is
+comfortable installing a small program on their own machine and a VPN on two devices.
+
+## What you get
+
+- **Two-finger gestures** for the keys a phone keyboard hides: arrows, `Ctrl-C`, `Ctrl-D`,
+  `Esc`, `Ctrl-Z`, plus a sticky modifier.
+- **Pinch to resize the text**, so a narrow phone screen is not a cramped one.
+- **Named tmux sessions** that survive the app being closed, so a long build keeps running.
+- **Reconnect that waits.** A host that is asleep or out of cell range is retried
+  indefinitely rather than written off after 40 seconds.
+- **A swipe-to-run command palette** for the commands you actually type often.
+
+## What this is not, yet
+
+- **No Windows.** The agent is POSIX-only (`openpty`, `TIOCSCTTY`, `killpg`). Windows needs a
+  ConPTY layer and does not have one.
+- **The host needs Python 3.11+**, macOS or Linux.
+- **It does not wake your machine.** A sleeping host serves nothing. Tailscale gets you
+  reachability from anywhere; it does not get you a powered-on laptop.
+- **iOS builds need an Apple account.** Expo Go works for trying it; a standalone build needs
+  the Apple Developer Program.
+
+Everything above is a deliberate boundary, not a bug in disguise.
 
 ## Try it in five minutes
 
-You need Python 3.11+, the client repo, and either Tailscale or a shared LAN.
+You need Python 3.11+ on the host, the app on your phone, and either Tailscale (works from
+anywhere) or being on the same Wi-Fi (works at home).
+
+Install the app first:
+
+- **Android** — download the preview APK from the client's README and open it.
+- **iOS** — install Expo Go and scan the QR from `npx expo start`, or see the app README for a
+  standalone build.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
@@ -22,8 +52,9 @@ sh-agent $SH_HOST=0.0.0.0 $SH_ALLOW_LAN=1
 Or from a clone, `./scripts/install.sh`. The installer picks `uv` or `pipx` if you have
 either and falls back to a virtualenv if you do not.
 
-There is no token to generate and nothing to copy into your shell. The agent creates one on first
-run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code:
+There is no token to generate and nothing to copy into your shell. The agent creates one on
+first run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code. Open the app,
+tap **Scan to pair**, and point your phone at it:
 
 ```
 sh-agent listening on 0.0.0.0:8765
@@ -38,10 +69,8 @@ Pair your phone by scanning this, or open the link:
 sh://connect?host=172.20.10.3&port=8765&token=...
 ```
 
-Scan it with the app and you are connected. The token persists, so restarting the agent does not
-invalidate a phone that is already paired.
-
-Print the code again at any time without restarting anything:
+The token persists, so restarting the agent never unpairs a phone. To get the code again later --
+to add a second phone, or after deleting `agent.env` -- without restarting anything:
 
 ```bash
 sh-agent --pairing
@@ -61,12 +90,6 @@ Add `SH_WRITE_TOKEN` if you want to edit the command palette from the phone.
 git clone https://github.com/Faisal-Fayaz/sh-app.git && cd sh-app
 npm install            # postinstall regenerates the inlined xterm payload
 npx expo start         # scan the QR with Expo Go
-```
-
-Or install a standalone build instead of running Expo Go:
-
-```bash
-npx eas-cli@latest build --platform android --profile preview
 ```
 
 In the app, tap **Scan to pair** and point the camera at the terminal. If the camera is
@@ -302,15 +325,16 @@ one thing that would make `preexec_fn` unsafe.
 
 ## Roadmap
 
-M1 through M5 are complete: the PTY agent, the Expo client, the gesture layer, the command
-palette, and Tailscale identity plus reconnect hardening. What remains is distribution
-rather than features.
+The features are built and verified on hardware. What remains is reach.
 
-- **Publish** — `sh-agent` to PyPI, and a signed build of the app (needs an Expo account
-  for EAS, or a local Gradle keystore).
-- **Bootstrap** — a one-command installer that sets up Tailscale, generates a token, and
-  hands the phone a scannable pairing code. Onboarding is currently the highest-friction
-  part of using this, not the networking.
-- **Windows** — out of scope for now. The agent is POSIX-only: `os.openpty`, `TIOCSCTTY`
-  and `killpg` have no Windows equivalent, and there is no ConPTY layer. Supporting it
-  means a real abstraction, not a patch. macOS and Linux are the supported hosts.
+- **Windows.** The one real gap. The agent is POSIX-only -- `os.openpty`, `TIOCSCTTY` and
+  `killpg` have no Windows equivalent and there is no ConPTY layer, so this is an
+  abstraction to write rather than a branch to patch. macOS and Linux are supported today.
+- **PyPI.** The package builds and passes `twine check`; it has not been uploaded.
+- **Wake on demand.** Not implemented, and not a small thing. Wake-on-LAN is a Layer 2
+  magic packet and Tailscale is Layer 3, so it cannot be sent over the tunnel at all --
+  it needs a second always-on machine whose only job is sending the packet. That machine
+  can just as well run the agent.
+
+Earlier milestones -- the PTY agent, the Expo client, the gesture layer, the command palette,
+Tailscale identity, reconnect hardening, and the pairing bootstrap -- are all done.
