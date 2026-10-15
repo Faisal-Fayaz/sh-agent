@@ -9,6 +9,9 @@ The client is [`sh-app`](https://github.com/Faisal-Fayaz/sh-app), an Expo app fo
 Releases are tagged and published by CI. What changed in each is in the
 [changelog](CHANGELOG.md); 0.1.1 is worth a look if you want to know why it is yanked.
 
+The agent collects nothing and reports to nobody; [the privacy policy](PRIVACY.md)
+says so precisely, and what it keeps on your machine.
+
 ## Who this is for
 
 Someone already uses a terminal, wants their phone to be a genuinely usable one, and is
