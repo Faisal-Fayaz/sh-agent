@@ -29,9 +29,10 @@ comfortable installing a small program on their own machine and a VPN on two dev
 
 ## What this is not, yet
 
-- **No Windows.** The agent is POSIX-only (`openpty`, `TIOCSCTTY`, `killpg`). Windows needs a
-  ConPTY layer and does not have one.
-- **The host needs Python 3.11+**, macOS or Linux.
+- **Windows runs plain shells only.** ConPTY covers the terminals themselves, but named tmux
+  sessions need tmux, which does not run natively on Windows, and Tailscale identity checks read
+  a unix socket Windows does not have, so a Windows agent authenticates by token alone.
+- **The host needs Python 3.11+**, on macOS, Linux or Windows.
 - **It does not wake your machine.** A sleeping host serves nothing. Tailscale gets you
   reachability from anywhere; it does not get you a powered-on laptop.
 - **iOS builds need an Apple account.** Expo Go works for trying it; a standalone build needs
@@ -65,8 +66,12 @@ rather not have a package manager involved:
 curl -fsSL https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.sh | bash
 ```
 
-That script picks `uv` or `pipx` if you have either, and falls back to a virtualenv if you do not.
-Running `./scripts/install.sh` from a clone does the same thing.
+```powershell
+irm https://raw.githubusercontent.com/Faisal-Fayaz/sh-agent/main/scripts/install.ps1 | iex
+```
+
+Each script picks `uv` or `pipx` if you have either, and falls back to a virtualenv if you do not.
+Running the one in `scripts/` from a clone does the same thing.
 
 There is no token to generate and nothing to copy into your shell. The agent creates one on
 first run, stores it in `~/.config/sh/agent.env` (mode 0600), and prints a QR code. Open the app,
@@ -120,7 +125,7 @@ uv venv && uv pip install -e ".[dev]"
 # or plain pip
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-./.venv/bin/python -m sh_agent
+./.venv/bin/python -m sh_agent        # Windows: .venv\Scripts\python -m sh_agent
 ```
 
 There is no `SH_TOKEN` to set. To pin one for a single run instead, export `SH_TOKEN`; it
@@ -157,6 +162,24 @@ phone saved. The agent prints the address it bound to, so check that line after 
 reboot; if it names the local network while you expected the tailnet, run
 `systemctl --user restart sh-agent`.
 
+## Windows
+
+The agent runs on Windows through ConPTY (`pywinpty`), which stands in for `openpty` and the
+controlling-terminal work described below. Pairing, streaming, resize and reconnect behave the
+same, and the default shell is `%COMSPEC%` (`cmd.exe`) rather than `/bin/bash -l`.
+
+Two things do not carry over, and neither is silent:
+
+- **Named sessions need tmux**, and tmux does not run natively on Windows. The default pty mode
+  needs nothing and is unaffected.
+- **Tailscale identity checks need `tailscaled`'s unix socket**, which on Windows is a named pipe
+  the agent does not speak. It falls back to token-only authentication, and `SH_TAILSCALE_REQUIRE=1`
+  would refuse every peer, so leave it unset. Binding the tailnet address still works, so pairing
+  and remote access are unaffected.
+
+The systemd section above is Linux; on Windows `install.ps1` is the whole setup, and `sh-agent`
+prints its pairing code the same way.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -166,7 +189,7 @@ reboot; if it names the local network while you expected the tailnet, run
 | `SH_HOST` | unset | Bind address. Unset ⇒ the tailnet address, or every interface when there is no tailnet |
 | `SH_PORT` | `8765` | Listen port |
 | `SH_ALLOW_LAN` | unset | Bind every interface even when on a tailnet. Dev only |
-| `SH_SHELL` | `/bin/bash -l` | Shell to spawn |
+| `SH_SHELL` | `/bin/bash -l` | Shell to spawn (`%COMSPEC%` on Windows) |
 | `SH_CWD` | — | Default working directory |
 | `SH_PALETTE` | `~/.config/sh/palette.json` | Palette file |
 | `SH_AUDIT` | `~/.local/state/sh/audit.log` | Audit log (`SH_AUDIT=""` disables) |
@@ -178,7 +201,7 @@ reboot; if it names the local network while you expected the tailnet, run
 | `SH_RING_CAPACITY` | `262144` | Replay buffer bytes per session |
 | `SH_TAILSCALE_REQUIRE` | unset | `1` ⇒ refuse any peer whose identity `tailscaled` can't confirm, including off-tailnet ones |
 | `SH_TAILSCALE_ALLOW` | unset | Comma-separated allowlist of tailnet logins; unset means any device on the tailnet |
-| `SH_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | tailscaled's LocalAPI socket |
+| `SH_TAILSCALE_SOCKET` | `/var/run/tailscale/tailscaled.sock` | tailscaled's LocalAPI socket (POSIX only) |
 | `SH_TMUX_ENABLED` | `1` | Offer tmux-backed named sessions |
 | `SH_TMUX_SECRET` | derived from `SH_TOKEN` | Secret for namespacing tmux session names |
 | `SH_TMUX_MAX_SESSIONS` | `12` | Cap on persisted tmux sessions |
@@ -243,7 +266,8 @@ network flaps.
 1. Reachable only over the tailnet unless `SH_ALLOW_LAN` is set.
 2. Bearer token compared with `hmac.compare_digest`; never logged.
 3. Tailscale identity resolution via the `tailscaled.sock` localapi `whois` endpoint, so the agent
-   can allowlist by login even if the token leaks to another node on the tailnet.
+   can allowlist by login even if the token leaks to another node on the tailnet. POSIX only: on
+   Windows the agent sees a named pipe it does not speak, and authenticates by token alone.
 4. Palette writes require a distinct token and are off by default.
 5. Built-in palette entries are immutable and cannot be shadowed in place — only overridden by name.
 6. Every auth event, session lifecycle event, and palette mutation is appended to the audit log.
@@ -340,14 +364,16 @@ option does the right thing on its own.
 the standard streams, so fd 0 is not yet the pty. The agent is single-threaded, which is the
 one thing that would make `preexec_fn` unsafe.
 
+None of this has a Windows counterpart and none of it needs one: ConPTY is told the size at
+spawn and through `setwinsize` afterwards, and the console host delivers the resize to whatever
+is listening. The backend seam is `PtyBackend`; `PosixPtyBackend` and `WindowsPtyBackend` are
+the two implementations.
+
 ## Roadmap
 
 The features are built and verified on hardware, the agent is on PyPI, and the app has a
 standalone Android build. What remains is reach.
 
-- **Windows.** The one real gap. The agent is POSIX-only -- `os.openpty`, `TIOCSCTTY` and
-  `killpg` have no Windows equivalent and there is no ConPTY layer, so this is an
-  abstraction to write rather than a branch to patch. macOS and Linux are supported today.
 - **Store distribution.** The Android build is sideloaded, so Play Protect warns about it, and
   iOS needs the Apple Developer Program. Both are accounts and review queues, not code.
 - **Wake on demand.** Not implemented, and not a small thing. Wake-on-LAN is a Layer 2
@@ -355,5 +381,6 @@ standalone Android build. What remains is reach.
   it needs a second always-on machine whose only job is sending the packet. That machine
   can just as well run the agent.
 
-Earlier milestones -- the PTY agent, the Expo client, the gesture layer, the command palette,
-Tailscale identity, reconnect hardening, and the pairing bootstrap -- are all done.
+Earlier milestones -- the PTY agent, Windows support over ConPTY, the Expo client, the gesture
+layer, the command palette, Tailscale identity, reconnect hardening, and the pairing bootstrap --
+are all done.
