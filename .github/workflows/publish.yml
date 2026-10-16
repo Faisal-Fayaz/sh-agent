@@ -83,11 +83,25 @@ jobs:
           expected = {
               "sh_agent/__init__.py",
               "sh_agent/__main__.py",
+              "sh_agent/app.py",
               "sh_agent/auth.py",
               "sh_agent/config.py",
+              "sh_agent/env.py",
               "sh_agent/onboarding.py",
+              "sh_agent/palette.py",
+              "sh_agent/protocol.py",
+              "sh_agent/pty_backend.py",
+              "sh_agent/pty_posix.py",
               "sh_agent/pty_session.py",
+              "sh_agent/pty_windows.py",
               "sh_agent/registry.py",
+              "sh_agent/routes/__init__.py",
+              "sh_agent/routes/commands.py",
+              "sh_agent/routes/deps.py",
+              "sh_agent/routes/health.py",
+              "sh_agent/routes/session.py",
+              "sh_agent/tmux.py",
+              "sh_agent/version.py",
           }
           missing = expected - set(names)
           assert not missing, f"wheel is missing {sorted(missing)}"

@@ -4,6 +4,37 @@ Notable changes to `sh-agent`, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 — 2026-10-16
+
+### Added
+
+- **Windows support.** The agent runs on Windows through ConPTY, via `pywinpty`
+  (a Windows-only dependency, installed automatically there). Pairing,
+  streaming, resize and reconnect behave as on macOS and Linux, and the default
+  shell is `%COMSPEC%` — `cmd.exe` — rather than `/bin/bash -l`. The platform
+  differences live behind a `PtyBackend` seam: `PosixPtyBackend` keeps
+  `openpty`, the controlling-terminal claim and `killpg`; `WindowsPtyBackend`
+  drives ConPTY and decodes its UTF-8 incrementally, because a multi-byte
+  character can straddle a read.
+
+  Two things do not carry over: tmux-backed named sessions need tmux, which does
+  not run natively on Windows, and Tailscale identity checks read `tailscaled`'s
+  unix socket, which on Windows is a named pipe the agent does not speak. Such
+  an agent authenticates by token alone, so `SH_TAILSCALE_REQUIRE=1` would
+  refuse every peer; the installer and the README say to leave it unset.
+
+- `scripts/install.ps1`, the Windows counterpart to `install.sh`: Python 3.11+
+  found via the `py` launcher, `uv` then `pipx` then a venv, and the same
+  honesty about what is missing.
+
+### Security
+
+- The audit log is now created with mode 0600 even under a permissive umask, and
+  an existing log left looser is tightened at startup. The directory is chmodded
+  0700 only when the agent created it, so a user-chosen `SH_AUDIT` location is
+  never second-guessed. Until now the file inherited the umask, which at the
+  common 022 means a world-readable record of every command run.
+
 ## 0.1.2 — 2026-10-15
 
 ### Fixed
