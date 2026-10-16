@@ -47,14 +47,19 @@ def _knobs_read_in_code() -> set[str]:
 
 
 def _render(value: object) -> str:
-    """How the README writes a default value down."""
+    """How the README writes a default value down.
+
+    Separators are normalised because the README writes a user's home the way
+    a shell shows it: on Windows the same directory is ``C:\\Users\\x``, and
+    the table still says ``~/.config/sh``.
+    """
     if isinstance(value, bool):
         return "1" if value else "unset"
     if value is None or value == "" or value == []:
         return "unset"
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
-    return str(value).replace(str(Path.home()), "~")
+    return str(value).replace(str(Path.home()), "~").replace(os.sep, "/")
 
 
 @pytest.fixture

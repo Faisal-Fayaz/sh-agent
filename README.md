@@ -301,7 +301,7 @@ a hot-reload dev loop hits `SH_MAX_SESSIONS` within minutes.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q          # 142 unit + API tests, incl. a fake tailscaled socket
+.venv/bin/python -m pytest -q          # 143 unit + API tests, incl. a fake tailscaled socket
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format .
 

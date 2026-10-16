@@ -41,6 +41,29 @@ jobs:
 
       - run: uv run --frozen ruff format --check .
 
+  windows:
+    name: test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # pywinpty is a win32-only dependency; --frozen proves the lockfile
+      # resolves for this platform as well as the others.
+      - run: uv sync --frozen --extra dev
+
+      # The suite's POSIX half is about tmux, systemd and process groups, and
+      # asserting on it here would be asserting on the absence of Windows. What
+      # is worth a Windows runner is the part that has a Windows branch: the
+      # session core on a fake backend, the ConPTY integration test, the text
+      # handling, the argument splitting and the documented defaults.
+      - run: uv run --frozen pytest tests/test_pty_session.py tests/test_docs.py -q
+
+      - run: uv run --frozen ruff check .
+
   installer:
     name: installer
     runs-on: ubuntu-latest

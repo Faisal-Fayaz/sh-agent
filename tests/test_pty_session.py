@@ -15,6 +15,7 @@ from sh_agent.pty_windows import IncrementalText
 # Only the tests that need a real pty are POSIX-bound. The rest run everywhere,
 # which is what lets a windows-latest job say something about the session core.
 posix_only = pytest.mark.skipif(os.name == "nt", reason="needs a POSIX pty")
+windows_only = pytest.mark.skipif(os.name != "nt", reason="needs a ConPTY")
 
 
 def test_base64_roundtrip_preserves_multibyte_boundaries() -> None:
@@ -245,6 +246,38 @@ async def test_detached_output_is_replayable_by_offset() -> None:
         mid = max(0, end - 5)
         _, tail = session.replay_from(mid)
         assert len(tail) == 5
+    finally:
+        session.close()
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_windows_pty_echoes_stdin_and_reports_exit_code() -> None:
+    """The ConPTY path end to end, which only a Windows runner can answer for.
+
+    cmd.exe prints what it is told to print, so if the marker comes back then
+    the spawn, the reader thread, the incremental text handling and the buffer
+    are all working together on this platform.
+
+    ``exit`` checks the other end: EOF has to arrive, the finish path has to
+    read the exit status off the process, and the session has to close.
+    """
+    loop = asyncio.get_running_loop()
+    session = PtySession(session_id="t-win", loop=loop, shell="cmd.exe /Q", ring_capacity=65536)
+    await session.open()
+    try:
+        assert session.pid is not None
+        session.write(b"echo marker-42\r\n")
+        output = await _drain(session, expect_contains=b"marker-42", timeout=25.0)
+        assert b"marker-42" in output, f"ConPTY produced: {output!r}"
+
+        session.resize(100, 30)
+        closed = asyncio.Event()
+        session.on_close(closed.set)
+        session.write(b"exit 3\r\n")
+        await asyncio.wait_for(closed.wait(), timeout=25.0)
+        assert session.closed, "the session never noticed the shell exiting"
+        assert session.exit_code == 3
     finally:
         session.close()
 
