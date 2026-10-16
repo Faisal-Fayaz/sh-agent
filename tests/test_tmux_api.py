@@ -516,23 +516,33 @@ def test_resizing_a_pty_delivers_sigwinch_to_the_shell() -> None:
             if data:
                 chunks.append(data)
 
+        def text() -> str:
+            return "".join(base64.b64decode(chunk).decode(errors="replace") for chunk in chunks)
+
         session = PtySession(session_id="winsize", loop=loop, shell="/bin/bash", cols=30, rows=10)
         await session.open()
         session.attach(sender)
-        # bash services traps between foreground commands, so the sleep is short enough
-        # that it returns and the trap runs while we are still reading.
-        session.write(b"trap 'stty size' WINCH; stty size; sleep 1\n")
-        await asyncio.sleep(0.5)
+        # `read` is a builtin, so bash itself stays the foreground process and
+        # the kernel delivers SIGWINCH to bash rather than to a child job. With
+        # `sleep` here the signal goes to sleep's process group, bash never runs
+        # the trap, and the test only passed when the resize won a race with
+        # bash's own startup.
+        session.write(b"trap 'stty size' WINCH; stty size; read -t 5 -r x\n")
+
+        # Wait for the size bash started with, so the resize below is the only
+        # thing that can produce the size the trap reports.
+        for _ in range(200):
+            if "10 30" in text():
+                break
+            await asyncio.sleep(0.05)
         session.resize(48, 21)
 
-        text = ""
         for _ in range(100):
-            text = "".join(base64.b64decode(c).decode(errors="replace") for c in chunks)
-            if re.search(r"\b21 48\b", text):
+            if re.search(r"\b21 48\b", text()):
                 break
             await asyncio.sleep(0.1)
         session.close()
-        return text
+        return text()
 
     text = asyncio.run(run())
     assert re.search(r"\b21 48\b", text), f"shell never saw the resize; output was: {text!r}"

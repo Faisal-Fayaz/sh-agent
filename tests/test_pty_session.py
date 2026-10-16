@@ -8,7 +8,6 @@ import pytest
 
 from sh_agent.config import default_shell
 from sh_agent.protocol import decode_bytes, encode_bytes, parse_client_message
-from sh_agent.pty_posix import get_winsize
 from sh_agent.pty_session import PtySession, RingBuffer, _unquote_windows, shell_argv
 from sh_agent.pty_windows import IncrementalText
 
@@ -204,6 +203,8 @@ async def test_pty_echoes_stdin_and_reports_exit_code() -> None:
 @posix_only
 @pytest.mark.asyncio
 async def test_pty_resize_changes_reported_winsize() -> None:
+    from sh_agent.pty_posix import get_winsize
+
     loop = asyncio.get_running_loop()
     session = PtySession(session_id="t-resize", loop=loop, shell="/bin/sh")
     await session.open()

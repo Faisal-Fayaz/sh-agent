@@ -38,6 +38,13 @@ def _claim_controlling_tty(slave_fd: int) -> Callable[[], None]:
 
     This targets the slave fd rather than stdin because CPython runs preexec_fn
     before it dup2's the standard streams into place, so fd 0 is not yet the pty.
+
+    bash does not need this: it claims a controlling terminal for itself at
+    startup, so a test that watches a bash trap fire passes whether or not the
+    ioctl is here. tmux is the one that proves it -- remove the ioctl and the
+    tmux resize test fails, with tmux still rendering for the size it started
+    with. It is also the case that matters, since full-screen programs are the
+    reason the signal exists.
     """
 
     def setup() -> None:
