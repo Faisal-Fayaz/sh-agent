@@ -64,6 +64,50 @@ jobs:
 
       - run: uv run --frozen ruff check .
 
+      # install.sh is covered by the installer job on Linux; install.ps1 can
+      # only be read on Windows, and parsing it is the cheapest thing that can
+      # be said about it without running it.
+      - name: the installer parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }
+
+      # The claim the backend has to earn on this platform: the agent starts,
+      # binds, and answers. Nothing short of running it says that.
+      - name: the agent starts and serves
+        shell: pwsh
+        run: |
+          $env:SH_TOKEN = "ci-token"
+          $env:SH_HOST = "127.0.0.1"
+          $env:SH_PORT = "8791"
+          $env:SH_AUDIT = "$env:RUNNER_TEMP\audit.log"
+          $agent = Start-Process -FilePath "uv" -PassThru -NoNewWindow `
+            -ArgumentList "run", "--frozen", "sh-agent" `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\agent.out.log" `
+            -RedirectStandardError "$env:RUNNER_TEMP\agent.err.log"
+          try {
+            foreach ($attempt in 1..30) {
+              Start-Sleep -Seconds 1
+              if ($agent.HasExited) { break }
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:8791/health" -TimeoutSec 2
+                if ($health.status -eq "ok") {
+                  Write-Host "healthy: version $($health.version), shell $($health.shell)"
+                  exit 0
+                }
+              } catch { }
+            }
+            Write-Host "--- agent stdout ---"; Get-Content "$env:RUNNER_TEMP\agent.out.log" -ErrorAction SilentlyContinue
+            Write-Host "--- agent stderr ---"; Get-Content "$env:RUNNER_TEMP\agent.err.log" -ErrorAction SilentlyContinue
+            Write-Host "the agent never answered on /health"
+            exit 1
+          } finally {
+            if (-not $agent.HasExited) { Stop-Process -Id $agent.Id -Force }
+          }
+
   installer:
     name: installer
     runs-on: ubuntu-latest
