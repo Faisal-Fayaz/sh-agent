@@ -7,7 +7,7 @@ import os
 from fastapi import APIRouter, Depends, Request
 
 from ..auth import Authenticator, Identity
-from ..config import DEFAULT_SHELL, Config
+from ..config import Config, default_shell
 from ..protocol import PROTOCOL_VERSION
 from ..registry import SessionRegistry
 from ..version import __version__
@@ -27,7 +27,7 @@ async def health(request: Request) -> dict[str, object]:
         "version": __version__,
         "sessions": registry.count(),
         "max_sessions": registry.max_sessions,
-        "shell": config.shell or DEFAULT_SHELL,
+        "shell": config.shell or default_shell(),
         "write_enabled": bool(config.auth.write_token),
         "tailscale_available": authenticator.whois.available(),
         "tailscale_required": config.auth.tailscale_require,

@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import errno
-import fcntl
 import os
 import shlex
-import signal
-import struct
-import termios
+import subprocess
 from collections import deque
 from collections.abc import Awaitable, Callable
 
-from .config import DEFAULT_SHELL
-from .protocol import ServerMessage, stdout_frame
+from .config import default_shell
+from .protocol import ServerMessage, exit_frame, stdout_frame
+from .pty_backend import PtyBackend
 
 READ_SIZE = 65536
 DEFAULT_RING_CAPACITY = 256 * 1024
@@ -20,25 +17,33 @@ DEFAULT_TERM = "xterm-256color"
 
 Sender = Callable[[ServerMessage], Awaitable[None]]
 
+BackendFactory = Callable[[dict[str, str]], PtyBackend]
 
-def _claim_controlling_tty(slave_fd: int) -> Callable[[], None]:
-    """Make the slave pty the child's controlling terminal.
 
-    ``start_new_session=True`` calls setsid(), which leaves the child as a session
-    leader with no controlling terminal. Without one the kernel has no foreground
-    process group, so TIOCSWINSZ updates the stored window size but never delivers
-    SIGWINCH. Programs that poll for it simply never learn about a resize: tmux and
-    every other full-screen app keep rendering for the size they saw at startup.
+def shell_argv(shell: str | None) -> list[str]:
+    """Split a shell setting into an argv.
 
-    This targets the slave fd rather than stdin because CPython runs preexec_fn
-    before it dup2's the standard streams into place, so fd 0 is not yet the pty.
+    shlex's POSIX rules eat backslashes, and a Windows executable path is
+    mostly backslashes -- ``C:\\Program Files\\...`` would arrive as
+    ``C:Program Files...``. On Windows the non-POSIX rules keep the
+    backslashes but leave surrounding quotes attached, so those come off here.
     """
+    if not shell:
+        shell = default_shell()
+    if os.name != "nt":
+        return shlex.split(shell)
+    return _unquote_windows(shlex.split(shell, posix=False))
 
-    def setup() -> None:
-        os.setsid()
-        fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
 
-    return setup
+def _unquote_windows(tokens: list[str]) -> list[str]:
+    return [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
+
+
+def shell_join(argv: list[str]) -> str:
+    """The inverse of shell_argv, for showing a session's shell."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(argv)
+    return shlex.join(argv)
 
 
 class RingBuffer:
@@ -88,17 +93,15 @@ class RingBuffer:
         return bytes(out)
 
 
-def set_winsize(fd: int, cols: int, rows: int) -> None:
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-
-
-def get_winsize(fd: int) -> tuple[int, int]:
-    packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
-    rows, cols, _, _ = struct.unpack("HHHH", packed)
-    return cols, rows
-
-
 class PtySession:
+    """A shell in a pty, with replay, attachment, and a platform underneath.
+
+    Everything here is the same on every platform; ``PosixPtyBackend`` and
+    ``WindowsPtyBackend`` own the parts that are not. The backend calls the
+    two callbacks below from whatever thread it reads on, so they marshal
+    onto the loop before touching session state.
+    """
+
     def __init__(
         self,
         session_id: str,
@@ -112,24 +115,25 @@ class PtySession:
         mode: str = "pty",
         slug: str | None = None,
         tmux_name: str | None = None,
+        backend_factory: BackendFactory | None = None,
     ) -> None:
         self.id = session_id
         self._loop = loop
-        self._shell_argv = shlex.split(shell) if shell else shlex.split(DEFAULT_SHELL)
+        self._shell_argv = shell_argv(shell)
         self.mode = mode
         self.slug = slug
         self.tmux_name = tmux_name
         self._cwd = cwd
         self._env_overrides = env_overrides or {}
-        self._master_fd: int | None = None
-        self._proc: asyncio.subprocess.Process | None = None
+        self._backend: PtyBackend | None = None
+        self._backend_factory = backend_factory
         self._cols = cols
         self._rows = rows
         self._sender: Sender | None = None
         self._pending: set[asyncio.Task[None]] = set()
         self._close_listeners: list[Callable[[], None]] = []
-        self._reader_registered = False
         self._closed = False
+        self._finishing = False
         self.exit_code: int | None = None
         self.created_at = loop.time()
         self.last_activity = loop.time()
@@ -138,7 +142,7 @@ class PtySession:
 
     @property
     def shell(self) -> str:
-        return shlex.join(self._shell_argv)
+        return shell_join(self._shell_argv)
 
     @property
     def is_tmux(self) -> bool:
@@ -150,7 +154,7 @@ class PtySession:
 
     @property
     def pid(self) -> int | None:
-        return self._proc.pid if self._proc is not None else None
+        return self._backend.pid if self._backend is not None else None
 
     @property
     def cols(self) -> int:
@@ -165,7 +169,6 @@ class PtySession:
         return self._closed
 
     async def open(self) -> None:
-        master_fd, slave_fd = os.openpty()
         env = {
             **os.environ,
             "TERM": DEFAULT_TERM,
@@ -173,25 +176,30 @@ class PtySession:
             "LANG": os.environ.get("LANG", "en_US.UTF-8"),
             **self._env_overrides,
         }
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._shell_argv,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=self._cwd,
-                env=env,
-                preexec_fn=_claim_controlling_tty(slave_fd),
-                close_fds=True,
-            )
-        finally:
-            os.close(slave_fd)
-        os.set_blocking(master_fd, False)
-        set_winsize(master_fd, self._cols, self._rows)
-        self._master_fd = master_fd
-        self._proc = proc
-        self._loop.add_reader(master_fd, self._on_readable)
-        self._reader_registered = True
+        backend = self._make_backend(env)
+        self._backend = backend
+        await backend.start(self._data_from_backend, self._exit_from_backend)
+
+    def _make_backend(self, env: dict[str, str]) -> PtyBackend:
+        if self._backend_factory is not None:
+            return self._backend_factory(env)
+        kwargs = {
+            "loop": self._loop,
+            "argv": self._shell_argv,
+            "cwd": self._cwd,
+            "env": env,
+            "cols": self._cols,
+            "rows": self._rows,
+        }
+        # Imported here so a POSIX machine never needs winpty installed, and
+        # a Windows one never imports termios.
+        if os.name == "nt":
+            from .pty_windows import WindowsPtyBackend
+
+            return WindowsPtyBackend(**kwargs)
+        from .pty_posix import PosixPtyBackend
+
+        return PosixPtyBackend(**kwargs)
 
     def on_close(self, callback: Callable[[], None]) -> None:
         """Register a synchronous callback fired when the session is torn down."""
@@ -231,88 +239,37 @@ class PtySession:
         self.last_activity = self._loop.time()
 
     def write(self, data: bytes) -> None:
-        if self._master_fd is None or self._closed:
+        if self._backend is None or self._closed:
             return
-        view = memoryview(data)
-        while view:
-            try:
-                written = os.write(self._master_fd, view)
-            except BlockingIOError:
-                self.touch()
-                return
-            except OSError:
-                return
-            if written <= 0:
-                return
-            view = view[written:]
+        self._backend.write(data)
         self.touch()
 
     def resize(self, cols: int, rows: int) -> None:
         self._cols, self._rows = cols, rows
-        if self._master_fd is not None and not self._closed:
-            try:
-                set_winsize(self._master_fd, cols, rows)
-            except OSError:
-                pass
+        if self._backend is not None and not self._closed:
+            self._backend.resize(cols, rows)
 
     def kill(self) -> None:
-        proc = self._proc
-        if proc is None or proc.returncode is not None:
-            return
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGHUP)
-        except (ProcessLookupError, PermissionError, OSError):
-            try:
-                proc.terminate()
-            except ProcessLookupError:
-                pass
+        if self._backend is not None:
+            self._backend.kill()
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
         self._notify_closed()
-        self._deregister_reader()
-        self.kill()
-        if self._master_fd is not None:
-            try:
-                os.close(self._master_fd)
-            except OSError:
-                pass
-            self._master_fd = None
-        proc = self._proc
-        if proc is not None and proc.returncode is None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+        if self._backend is not None:
+            self._backend.close()
         self._sender = None
 
-    def _deregister_reader(self) -> None:
-        if self._reader_registered and self._master_fd is not None:
-            try:
-                self._loop.remove_reader(self._master_fd)
-            except (OSError, ValueError):
-                pass
-            self._reader_registered = False
+    def _data_from_backend(self, chunk: bytes) -> None:
+        # Callable from the backend's reader thread: hand it to the loop.
+        self._loop.call_soon_threadsafe(self._deliver, chunk)
 
-    def _on_readable(self) -> None:
-        fd = self._master_fd
-        if fd is None:
-            return
-        try:
-            chunk = os.read(fd, READ_SIZE)
-        except BlockingIOError:
-            return
-        except OSError as exc:
-            if exc.errno in (errno.EIO, errno.EBADF):
-                self._loop.create_task(self._finish())
-            return
+    def _exit_from_backend(self) -> None:
+        self._loop.call_soon_threadsafe(self._begin_finish)
 
-        if not chunk:
-            self._loop.create_task(self._finish())
-            return
-
+    def _deliver(self, chunk: bytes) -> None:
         seq = self.buffer.append(chunk)
         self.touch()
         sender = self._sender
@@ -321,6 +278,16 @@ class PtySession:
             self._pending.add(task)
             task.add_done_callback(self._pending.discard)
 
+    def _begin_finish(self) -> None:
+        # EOF can arrive twice -- a read of zero bytes and then EIO -- and the
+        # finish path closes things, so it runs once.
+        if self._finishing:
+            return
+        self._finishing = True
+        task = self._loop.create_task(self._finish())
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
     async def _send(self, sender: Sender, message: ServerMessage) -> None:
         try:
             await sender(message)
@@ -328,29 +295,16 @@ class PtySession:
             self.detach()
 
     async def _finish(self) -> None:
-        self._deregister_reader()
-        proc = self._proc
-        if proc is not None and proc.returncode is None:
-            try:
-                await proc.wait()
-            except Exception:
-                pass
-            code = proc.returncode
-            self.exit_code = os.waitstatus_to_exitcode(code) if code is not None else None
+        code = None
+        backend = self._backend
+        if backend is not None:
+            backend.release()
+            code = await backend.wait()
+        self.exit_code = code
         self._closed = True
         self._notify_closed()
-        if self._master_fd is not None:
-            try:
-                os.close(self._master_fd)
-            except OSError:
-                pass
-            self._master_fd = None
         sender = self._sender
         if sender is not None:
-            from .protocol import exit_frame
-
-            task = self._loop.create_task(
-                self._send(sender, exit_frame(self.exit_code if self.exit_code is not None else 0))
-            )
+            task = self._loop.create_task(self._send(sender, exit_frame(code if code is not None else 0)))
             self._pending.add(task)
             task.add_done_callback(self._pending.discard)

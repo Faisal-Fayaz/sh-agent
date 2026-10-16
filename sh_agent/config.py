@@ -12,10 +12,23 @@ from .env import int_env as _int_env
 DEFAULT_PORT = 8765
 DEFAULT_PALETTE_PATH = os.path.expanduser("~/.config/sh/palette.json")
 DEFAULT_AUDIT_PATH = os.path.expanduser("~/.local/state/sh/audit.log")
-# Named once because three places need it: the session spawner, /health, and the
-# configuration table in the README. Two of those had already drifted apart in
-# spirit -- they agreed only by luck.
+# Named once because three places need it: the session spawner, /health, and
+# the configuration table in the README. Two of those had already drifted apart
+# in spirit -- they agreed only by luck.
 DEFAULT_SHELL = "/bin/bash -l"
+# Windows has no bash to assume. The command interpreter is the one thing
+# certain to be there, and it is what %COMSPEC% names.
+WINDOWS_SHELL = os.environ.get("COMSPEC", "cmd.exe")
+
+
+def default_shell() -> str:
+    """The shell to spawn when SH_SHELL says nothing.
+
+    Split from DEFAULT_SHELL rather than made a conditional constant so the
+    README can document both and the configuration test can tell which
+    machine it is running on.
+    """
+    return WINDOWS_SHELL if os.name == "nt" else DEFAULT_SHELL
 
 
 def tailnet_address() -> str | None:
